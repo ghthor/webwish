@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"os"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -80,7 +79,7 @@ func main() {
 
 	<-ctx.Done()
 	if err = context.Cause(rootCtx); err != nil && !errors.Is(err, context.Canceled) {
-		log.Error("Could not start server", "error", err)
+		log.Error("failed to start webwish", "error", err)
 	}
 
 	log.Info("Stopping SSH server")
@@ -183,7 +182,6 @@ var bold = lipgloss.NewStyle().Bold(true)
 func (m *model) View() string {
 	b := &m.b
 	b.Reset()
-	fmt.Fprintf(b, " arg0: %s\n", os.Args[0])
 	fmt.Fprintf(b, " term: %s\n", m.term)
 	fmt.Fprintf(b, " size: (%d,%d)\n", m.width, m.height)
 	fmt.Fprintf(b, " time: %s\n", bold.Render(m.time.Format(time.RFC1123)))
