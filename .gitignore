@@ -1,0 +1,4 @@
+.direnv/
+.ssh/
+go.work*
+gotty/
