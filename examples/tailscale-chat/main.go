@@ -26,6 +26,7 @@ import (
 	"github.com/charmbracelet/wish"
 	"github.com/charmbracelet/wish/logging"
 	"github.com/ghthor/webwish"
+	"github.com/ghthor/webwish/mpty"
 	"github.com/ghthor/webwish/tshelper"
 	"github.com/ghthor/webwish/tstea"
 	"golang.org/x/sync/errgroup"
@@ -52,21 +53,12 @@ func main() {
 
 	grp, grpCtx := errgroup.WithContext(ctx)
 
-	sim := tea.NewProgram(&simulation{},
-		tea.WithContext(grpCtx),
-		tea.WithoutSignals(),
-		tea.WithoutRenderer(),
-		tea.WithInput(nil),
-	)
-
-	grp.Go(func() error {
-		_, serr := sim.Run()
-		if serr != nil && !errors.Is(serr, context.Canceled) {
-			cancel(serr)
-			return serr
-		}
-		return nil
-	})
+	mainprog := mpty.NewProgram(ctx, cancel, &simulation{})
+	select {
+	case <-ctx.Done():
+	case <-mainprog.RunIn(grp):
+	}
+	sim := mainprog.Program
 
 	ts, err := tshelper.NewListeners("webwish", sshPort, httpPort)
 	if err != nil {
