@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"time"
 
+	"github.com/cenkalti/backoff/v5"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/log"
 	"github.com/charmbracelet/ssh"
 	"github.com/charmbracelet/wish"
 	"github.com/charmbracelet/wish/bubbletea"
@@ -91,11 +94,13 @@ func (f *TeaTYFactory) New(ctx context.Context, params map[string][]string, conn
 		tea.WithInput(t),
 		tea.WithOutput(t),
 	)
-	grp, _ := errgroup.WithContext(ctx)
+
+	grp, grpCtx := errgroup.WithContext(ctx)
 	grp.Go(func() error {
 		defer func() {
 			t.Close()
 			p.Close()
+			conn.Close()
 		}()
 
 		_, err := prog.Run()
@@ -108,6 +113,7 @@ func (f *TeaTYFactory) New(ctx context.Context, params map[string][]string, conn
 	})
 
 	return &TeaTYProgram{
+		ctx: grpCtx,
 		pty: p,
 		tty: t,
 
@@ -117,6 +123,8 @@ func (f *TeaTYFactory) New(ctx context.Context, params map[string][]string, conn
 }
 
 type TeaTYProgram struct {
+	ctx context.Context
+
 	pty, tty *os.File
 
 	grp     *errgroup.Group
@@ -134,6 +142,8 @@ func (t *TeaTYProgram) Write(p []byte) (n int, err error) {
 }
 
 func (t *TeaTYProgram) Close() error {
+	t.tty.Close()
+	t.pty.Close()
 	t.program.Quit()
 	return t.grp.Wait()
 }
@@ -143,17 +153,32 @@ func (t *TeaTYProgram) WindowTitleVariables() map[string]any {
 }
 
 func (t *TeaTYProgram) ResizeTerminal(width, height int) error {
-	err := errors.Join(
-		pty.Setsize(t.pty, &pty.Winsize{
-			Cols: uint16(width),
-			Rows: uint16(height),
-		}),
-		pty.Setsize(t.tty, &pty.Winsize{
-			Cols: uint16(width),
-			Rows: uint16(height),
+	exp := &backoff.ExponentialBackOff{
+		InitialInterval:     10 * time.Millisecond,
+		RandomizationFactor: 0.0,
+		Multiplier:          1.1,
+		MaxInterval:         500 * time.Millisecond,
+	}
+	_, err := backoff.Retry(t.ctx, func() (struct{}, error) {
+		return struct{}{}, errors.Join(
+			pty.Setsize(t.pty, &pty.Winsize{
+				Cols: uint16(width),
+				Rows: uint16(height),
+			}),
+			pty.Setsize(t.tty, &pty.Winsize{
+				Cols: uint16(width),
+				Rows: uint16(height),
+			}),
+		)
+	},
+		backoff.WithBackOff(exp),
+		backoff.WithMaxElapsedTime(2*time.Second),
+		backoff.WithNotify(func(err error, d time.Duration) {
+			log.Warn("pty resize", "error", err, "retrying", d)
 		}),
 	)
 	if err != nil {
+		log.Warn("pty resize retry exhausted", "error", err)
 		return err
 	}
 	t.program.Send(tea.WindowSizeMsg{

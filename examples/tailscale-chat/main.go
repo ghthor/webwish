@@ -185,7 +185,7 @@ func (m *clientInitModel) Init() tea.Cmd {
 			Program: m.client,
 		}
 		m.sim.Send(msg)
-		return msg
+		return nil
 	}, m.model.Init())
 }
 
@@ -283,13 +283,14 @@ func (m *simulation) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for _, p := range m.clients {
 			p.Send(msg)
 		}
-		log.Info("chat", "t", msg.simAt, "lag", msg.simAt.Sub(msg.cliAt), "who", msg.who, "sess", msg.sess, "msg", msg.msg)
+		log.Debug("chat", "t", msg.simAt, "lag", msg.simAt.Sub(msg.cliAt), "who", msg.who, "sess", msg.sess, "msg", msg.msg)
 
 	case clientConnectedMsg:
 		m.clients[msg.id] = msg.Program
 		log.Info("connected", "id", msg.id)
 		chat := make([]chatMsg, 0, max(10, len(m.msgs)))
 		chat = append(chat, m.msgs...)
+		msg.Program.Send(msg)
 		msg.Program.Send(chat)
 
 	case clientDisconnectedMsg:

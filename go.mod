@@ -3,6 +3,7 @@ module github.com/ghthor/webwish
 go 1.25.3
 
 require (
+	github.com/cenkalti/backoff/v5 v5.0.3
 	github.com/charmbracelet/bubbles v0.21.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
@@ -10,10 +11,10 @@ require (
 	github.com/charmbracelet/ssh v0.0.0-20250128164007-98fd5ae11894
 	github.com/charmbracelet/wish v1.4.7
 	github.com/creack/pty v1.1.23
-	github.com/ghthor/gotty/v2 v2.3.5-0.20251026135819-c830287cb015
+	github.com/ghthor/gotty/v2 v2.3.5-0.20251026181702-b5d904cb14da
 	github.com/gorilla/websocket v1.5.1
 	github.com/muesli/termenv v0.16.0
-	golang.org/x/sync v0.14.0
+	golang.org/x/sync v0.17.0
 	tailscale.com v1.90.2
 )
 
