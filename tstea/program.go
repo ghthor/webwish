@@ -73,8 +73,8 @@ var _ server.Factory = &TeaTYFactory{}
 
 func (*TeaTYFactory) Name() string { return "TeaTYFactory" }
 
-func (f *TeaTYFactory) New(params map[string][]string, conn *websocket.Conn) (server.Slave, error) {
-	ctx := f.ctx
+func (f *TeaTYFactory) New(ctx context.Context, params map[string][]string, conn *websocket.Conn) (server.Slave, error) {
+	ctx, cancel := ctxhelp.Join(f.ctx, ctx)
 
 	who, err := f.ts.WhoIs(ctx, conn.RemoteAddr().String())
 	if err != nil {
@@ -99,7 +99,8 @@ func (f *TeaTYFactory) New(params map[string][]string, conn *websocket.Conn) (se
 		}()
 
 		_, err := prog.Run()
-		if err != nil {
+		if err != nil && !errors.Is(err, context.Canceled) {
+			cancel(err)
 			return err
 		}
 

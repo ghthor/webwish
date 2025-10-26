@@ -118,8 +118,8 @@ github.com/fxamacker/cbor/v2 v2.7.0 h1:iM5WgngdRBanHcxugY4JySA0nk1wZorNOpTgCMedv
 github.com/fxamacker/cbor/v2 v2.7.0/go.mod h1:pxXPTn3joSm21Gbwsv0w9OSA2y1HFR9qXEeXQVeNoDQ=
 github.com/gaissmai/bart v0.18.0 h1:jQLBT/RduJu0pv/tLwXE+xKPgtWJejbxuXAR+wLJafo=
 github.com/gaissmai/bart v0.18.0/go.mod h1:JJzMAhNF5Rjo4SF4jWBrANuJfqY+FvsFhW7t1UZJ+XY=
-github.com/ghthor/gotty/v2 v2.3.5-0.20251025170424-71b9db14e2d7 h1:r7PgUvx5H18JJGJh5/h1pFq6xhuHWBNiKfMfcgm6A8g=
-github.com/ghthor/gotty/v2 v2.3.5-0.20251025170424-71b9db14e2d7/go.mod h1:T+/a7uRE+pkIv2+JdLvTQdTy37gtB6eRa4NkioOciS0=
+github.com/ghthor/gotty/v2 v2.3.5-0.20251026135819-c830287cb015 h1:XY9k/wznQMkWX6BTtuZ9iFXTGvaQ9wyYiMfqUG54VC0=
+github.com/ghthor/gotty/v2 v2.3.5-0.20251026135819-c830287cb015/go.mod h1:T+/a7uRE+pkIv2+JdLvTQdTy37gtB6eRa4NkioOciS0=
 github.com/github/fakeca v0.1.0 h1:Km/MVOFvclqxPM9dZBC4+QE564nU4gz4iZ0D9pMw28I=
 github.com/github/fakeca v0.1.0/go.mod h1:+bormgoGMMuamOscx7N91aOuUST7wdaJ2rNjeohylyo=
 github.com/go-json-experiment/json v0.0.0-20250813024750-ebf49471dced h1:Q311OHjMh/u5E2TITc++WlTP5We0xNseRMkHDyvhW7I=

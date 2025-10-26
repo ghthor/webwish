@@ -61,7 +61,7 @@ func main() {
 
 	grp.Go(func() error {
 		_, serr := sim.Run()
-		if serr != nil {
+		if serr != nil && !errors.Is(serr, context.Canceled) {
 			cancel(serr)
 			return serr
 		}
@@ -338,7 +338,10 @@ func (m *model) At(row, cell int) string {
 	return ""
 }
 
-func (m *model) Rows() int    { return len(m.chat) }
+func (m *model) Rows() int {
+	// return min(len(m.chat), m.ChatViewHeight())
+	return len(m.chat)
+}
 func (m *model) Columns() int { return 3 }
 
 type infoModel struct {
@@ -400,6 +403,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.cmdLine.Width = msg.Width
 		m.ViewportResize()
+		m.table.Offset(max(0, len(m.chat)-m.ChatViewHeight()-1))
 
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -414,8 +418,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case []chatMsg:
 		m.chat = m.chat[:0]
 		m.chat = append(m.chat, msg...)
+		m.table.Offset(max(0, len(m.chat)-m.ChatViewHeight()-1))
 	case chatMsg:
 		m.chat = append(m.chat, msg)
+		m.table.Offset(max(0, len(m.chat)-m.ChatViewHeight()-1))
 	}
 
 	m.cmdLine, cmd = m.cmdLine.Update(msg)

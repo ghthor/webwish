@@ -10,7 +10,7 @@ require (
 	github.com/charmbracelet/ssh v0.0.0-20250128164007-98fd5ae11894
 	github.com/charmbracelet/wish v1.4.7
 	github.com/creack/pty v1.1.23
-	github.com/ghthor/gotty/v2 v2.3.5-0.20251025170424-71b9db14e2d7
+	github.com/ghthor/gotty/v2 v2.3.5-0.20251026135819-c830287cb015
 	github.com/gorilla/websocket v1.5.1
 	github.com/muesli/termenv v0.16.0
 	golang.org/x/sync v0.14.0
