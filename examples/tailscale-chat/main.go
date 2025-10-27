@@ -55,7 +55,7 @@ func main() {
 
 	grp, grpCtx := errgroup.WithContext(ctx)
 
-	mainprog := mpty.NewProgram(ctx, cancel, &simulation{})
+	mainprog := mpty.NewProgram(ctx, cancel, &chatServer{})
 	select {
 	case <-ctx.Done():
 	case <-mainprog.RunIn(grp):
@@ -142,7 +142,7 @@ func newHttpModel() tstea.NewHttpModel {
 			infoModel: &infoModel{
 				term:   "xterm",
 				width:  80,
-				height: 24,
+				height: 40,
 				time:   time.Now(),
 
 				sess: sess,
@@ -176,15 +176,15 @@ type clientConnectedMsg struct {
 
 type clientDisconnectedMsg string
 
-type simulation struct {
+type chatServer struct {
 	broadcaster *ringbuf.RingBuffer[tea.Msg]
 }
 
-func (m *simulation) Init() tea.Cmd {
+func (m *chatServer) Init() tea.Cmd {
 	return nil
 }
 
-func (m *simulation) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *chatServer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case *ringbuf.RingBuffer[tea.Msg]:
 		m.broadcaster = msg
@@ -197,21 +197,12 @@ func (m *simulation) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			log.Warn("dropped chat", "t", msg.simAt, "lag", msg.simAt.Sub(msg.cliAt), "who", msg.who, "sess", msg.sess, "msg", msg.msg)
 		}
-
-		// TODO: re-enable these log messages
-	case clientConnectedMsg:
-		// m.clients[msg.id] = msg.Program
-		log.Info("connected", "id", msg.id)
-
-	case clientDisconnectedMsg:
-		// delete(m.clients, string(msg))
-		log.Info("disconnected", "id", msg)
 	}
 
 	return m, nil
 }
 
-func (m *simulation) View() string {
+func (m *chatServer) View() string {
 	return ""
 }
 
@@ -230,8 +221,16 @@ type model struct {
 	table   *table.Table
 	view    viewport.Model
 
-	// chat     []chatMsg
 	chatRing *unsafering.RingBuffer[chatMsg]
+
+	err error
+}
+
+var _ table.Data = &model{}
+var _ mpty.ClientModel = &model{}
+
+func (m *model) Err() error {
+	return m.err
 }
 
 func (m *model) At(row, cell int) string {
@@ -337,12 +336,6 @@ func (m *model) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 			cmds = append(cmds, m.CmdLineExecute())
 		}
 
-	case []chatMsg: //TODO: nothing actually sends this anymore
-		for _, c := range msg {
-			m.chatRing.Push(c)
-		}
-		m.SetTableOffset()
-
 	case []tea.Msg:
 		for _, msg := range msg {
 			switch msg := msg.(type) {
@@ -350,10 +343,10 @@ func (m *model) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 				m.infoModel, cmd = m.UpdateInfo(msg)
 				cmds = append(cmds, cmd)
 			case chatMsg:
-				// TODO: switch this over to a ringbuffer
 				m.chatRing.Push(msg)
 			case error:
-				log.Warn("ringbuffer read", "error", msg)
+				log.Warn("client fatal", "error", msg, "who", m.who.UserProfile.LoginName, "sess", m.sess.RemoteAddr().String())
+				return m, tea.Quit
 			default:
 				log.Warnf("unhandled broadcast message type: %T", msg)
 			}

@@ -28,6 +28,7 @@ type ClientModel interface {
 	UpdateClient(tea.Msg) (ClientModel, tea.Cmd)
 
 	Id() ClientId
+	Err() error
 }
 
 type Program struct {
@@ -172,10 +173,10 @@ type ClientMain struct {
 	subscriber *ringbuf.Subscriber[tea.Msg]
 	msgs       []tea.Msg
 
-	// The tea.Program does not safe way to wait for it to exit until AFTER it
-	// has started running. So to schedule disconnect messages when the program
-	// exits, we have to wait till the model Init() func is called and return a
-	// tea.Cmd to wait on it
+	// The tea.Program does not have safe way to wait for it to exit until
+	// AFTER it has started running. So to schedule disconnect messages when
+	// the program exits, we have to wait till the model Init() func is called
+	// and return a tea.Cmd to wait on it
 	program *tea.Program
 }
 
@@ -192,7 +193,7 @@ func (m *ClientMain) Init() tea.Cmd {
 		},
 		func() tea.Msg {
 			// TODO: these bare ch sends could leak, but I'm pretty sure only
-			// when the Main program is exitting so the who process would be
+			// when the Main program is exitting so the whole process would be
 			// about to exit
 			m.Input <- ClientConnectMsg(id)
 			return tea.Cmd(func() tea.Msg {

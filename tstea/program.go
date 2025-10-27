@@ -103,10 +103,14 @@ func (f *TeaTYFactory) New(ctx context.Context, params map[string][]string, conn
 			conn.Close()
 		}()
 
-		_, err := prog.Run()
+		finalModel, err := prog.Run()
 		if err != nil && !errors.Is(err, context.Canceled) {
 			cancel(err)
 			return err
+		}
+
+		if clientModel, ok := finalModel.(mpty.ClientModel); ok && clientModel.Err() != nil {
+			cancel(clientModel.Err())
 		}
 
 		cancel(nil)
