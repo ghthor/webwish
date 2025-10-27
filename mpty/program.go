@@ -84,12 +84,12 @@ func (m *Main) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case ClientConnectMsg:
-		// m.clients[msg.id] = msg.Program
 		log.Info("connected", "id", msg)
+		m.broadcaster.Write(msg)
 
 	case ClientDisconnectMsg:
-		// delete(m.clients, string(msg))
 		log.Info("disconnected", "id", msg)
+		m.broadcaster.Write(msg)
 
 	case time.Time:
 		// These ticks are important for periodically waking any subscribers

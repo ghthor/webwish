@@ -38,12 +38,18 @@ import (
 const (
 	sshPort  = 23234
 	httpPort = 28080
+
+	systemNick = "system"
 )
 
 var (
 	Bold       = lipgloss.NewStyle().Bold(true)
 	None       = lipgloss.NewStyle()
 	AlignRight = lipgloss.NewStyle().Align(lipgloss.Right)
+
+	StyleSystem    = lipgloss.NewStyle().Faint(true)
+	StyleSystemWho = StyleSystem.Align(lipgloss.Left)
+	StyleSystemMsg = StyleSystem
 )
 
 func main() {
@@ -169,19 +175,14 @@ func (m chatMsg) Id() string {
 	return m.who + " " + m.sess
 }
 
-type clientConnectedMsg struct {
-	id string
-	*tea.Program
-}
-
-type clientDisconnectedMsg string
-
 type chatServer struct {
 	broadcaster *ringbuf.RingBuffer[tea.Msg]
+
+	tick time.Time
 }
 
 func (m *chatServer) Init() tea.Cmd {
-	return nil
+	return tea.Batch(func() tea.Msg { return time.Now() })
 }
 
 func (m *chatServer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -191,12 +192,29 @@ func (m *chatServer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case chatMsg:
 		msg.simAt = time.Now()
+
 		if m.broadcaster != nil {
 			m.broadcaster.Write(msg)
 			log.Debug("chat", "t", msg.simAt, "lag", msg.simAt.Sub(msg.cliAt), "who", msg.who, "sess", msg.sess, "msg", msg.msg)
 		} else {
 			log.Warn("dropped chat", "t", msg.simAt, "lag", msg.simAt.Sub(msg.cliAt), "who", msg.who, "sess", msg.sess, "msg", msg.msg)
 		}
+
+	case mpty.ClientConnectMsg:
+		m.broadcaster.Write(chatMsg{
+			simAt: m.tick,
+			who:   systemNick,
+			msg:   fmt.Sprintf("%s connected", msg),
+		})
+	case mpty.ClientDisconnectMsg:
+		m.broadcaster.Write(chatMsg{
+			simAt: m.tick,
+			who:   systemNick,
+			msg:   fmt.Sprintf("%s disconnected", msg),
+		})
+
+	case time.Time:
+		m.tick = msg
 	}
 
 	return m, nil
@@ -233,15 +251,27 @@ func (m *model) Err() error {
 	return m.err
 }
 
-func (m *model) At(row, cell int) string {
+func (m *model) AtRaw(row int) chatMsg {
 	msg, _ := m.chatRing.AtInWindow(row, m.chatRing.Len())
+	return msg
+}
+
+const (
+	COL_TS = iota
+	COL_WHO
+	COL_MSG
+	COL_SZ
+)
+
+func (m *model) At(row, cell int) string {
+	msg := m.AtRaw(row)
 	switch cell {
-	case 0:
+	case COL_TS:
 		return msg.simAt.Format(time.TimeOnly)
-	case 1:
+	case COL_WHO:
 		id, _, _ := strings.Cut(msg.who, "@")
 		return " " + id
-	case 2:
+	case COL_MSG:
 		return " | " + msg.msg
 	default:
 	}
@@ -288,8 +318,20 @@ func (m *model) Init() tea.Cmd {
 		Border(lipgloss.Border{}).
 		Wrap(true).
 		StyleFunc(func(row, col int) lipgloss.Style {
-			if col == 1 {
+			msg := m.AtRaw(row)
+
+			switch col {
+			case COL_WHO:
+				if msg.who == systemNick {
+					return StyleSystemWho
+				}
+
 				return AlignRight
+			case COL_MSG:
+				if msg.who == systemNick {
+					return StyleSystemMsg
+				}
+			default:
 			}
 
 			return None
@@ -344,6 +386,10 @@ func (m *model) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			case chatMsg:
 				m.chatRing.Push(msg)
+
+			case mpty.ClientConnectMsg:
+			case mpty.ClientDisconnectMsg:
+
 			case error:
 				log.Warn("client fatal", "error", msg, "who", m.who.UserProfile.LoginName, "sess", m.sess.RemoteAddr().String())
 				return m, tea.Quit
