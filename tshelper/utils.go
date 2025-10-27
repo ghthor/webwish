@@ -26,7 +26,11 @@ func NewListeners(hostname string, sshPort, httpPort int) (Listeners, error) {
 	l.ts = new(tsnet.Server)
 	l.ts.Hostname = hostname
 
-	var err error
+	err := l.ts.Start()
+	if err != nil {
+		return l, fmt.Errorf("tsnet.Server failed to start: %w", err)
+	}
+
 	l.Ssh, err = l.ts.Listen("tcp", net.JoinHostPort("", fmt.Sprint(sshPort)))
 	if err != nil {
 		return l, errors.Join(
