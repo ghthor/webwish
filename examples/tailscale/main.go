@@ -22,6 +22,7 @@ import (
 	"github.com/charmbracelet/wish"
 	"github.com/charmbracelet/wish/logging"
 	"github.com/ghthor/webwish"
+	"github.com/ghthor/webwish/mpty"
 	"github.com/ghthor/webwish/tshelper"
 	"github.com/ghthor/webwish/tstea"
 	"golang.org/x/sync/errgroup"
@@ -93,7 +94,7 @@ func main() {
 	}
 }
 
-func newSshModel(ctx context.Context, pty ssh.Pty, sess tstea.Session, who *apitype.WhoIsResponse) tea.Model {
+func newSshModel(ctx context.Context, pty ssh.Pty, sess tstea.Session, who *apitype.WhoIsResponse) mpty.ClientModel {
 	return &model{
 		ctx:    ctx,
 		term:   pty.Term,
@@ -106,12 +107,12 @@ func newSshModel(ctx context.Context, pty ssh.Pty, sess tstea.Session, who *apit
 	}
 }
 
-func newHttpModel(ctx context.Context, sess tstea.Session, who *apitype.WhoIsResponse) tea.Model {
+func newHttpModel(ctx context.Context, sess tstea.Session, who *apitype.WhoIsResponse) mpty.ClientModel {
 	return &model{
 		ctx:    ctx,
 		term:   "xterm",
-		width:  0,
-		height: 0,
+		width:  80,
+		height: 40,
 		time:   time.Now(),
 
 		sess: sess,
@@ -119,7 +120,7 @@ func newHttpModel(ctx context.Context, sess tstea.Session, who *apitype.WhoIsRes
 	}
 }
 
-func newProg(ctx context.Context, m tea.Model, opts ...tea.ProgramOption) *tea.Program {
+func newProg(ctx context.Context, m mpty.ClientModel, opts ...tea.ProgramOption) *tea.Program {
 	opts = append(opts,
 		tea.WithContext(ctx),
 		tea.WithoutSignalHandler(),
@@ -155,6 +156,10 @@ type model struct {
 	who  *apitype.WhoIsResponse
 }
 
+func (m *model) Id() mpty.ClientId {
+	return mpty.ClientId(m.who.UserProfile.LoginName)
+}
+
 type timeMsg time.Time
 
 func (m *model) Init() tea.Cmd {
@@ -162,6 +167,10 @@ func (m *model) Init() tea.Cmd {
 }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	return m.UpdateClient(msg)
+}
+
+func (m *model) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case timeMsg:
 		m.time = time.Time(msg)
