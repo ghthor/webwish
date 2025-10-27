@@ -29,6 +29,7 @@ import (
 	"github.com/ghthor/webwish/mpty"
 	"github.com/ghthor/webwish/tshelper"
 	"github.com/ghthor/webwish/tstea"
+	"github.com/golang-cz/ringbuf"
 	"golang.org/x/sync/errgroup"
 	"tailscale.com/client/tailscale/apitype"
 )
@@ -58,7 +59,6 @@ func main() {
 	case <-ctx.Done():
 	case <-mainprog.RunIn(grp):
 	}
-	sim := mainprog.Program
 
 	ts, err := tshelper.NewListeners("webwish", sshPort, httpPort)
 	if err != nil {
@@ -69,7 +69,7 @@ func main() {
 		// wish.WithAddress(net.JoinHostPort(host, port)),
 		wish.WithHostKeyPath(".ssh/id_ed25519"),
 		wish.WithMiddleware(
-			tstea.WishMiddleware(ctx, ts.Client, newSshModel(sim), newProg(sim)),
+			tstea.WishMiddleware(ctx, ts.Client, newSshModel(), mainprog.NewClientProgram()),
 			logging.Middleware(),
 		),
 	)
@@ -89,7 +89,7 @@ func main() {
 	err = errors.Join(
 		webwish.RunSSH(grpCtx, grp, cancel, ts.Ssh, s),
 		webwish.RunHTTP(grpCtx, grp, cancel, ts.Http, tstea.NewTeaTYFactory(
-			ctx, ts.Client, newHttpModel(sim), newProg(sim),
+			ctx, ts.Client, newHttpModel(), mainprog.NewClientProgram(),
 		)),
 	)
 	if err != nil {
@@ -112,11 +112,10 @@ func main() {
 	}
 }
 
-func newSshModel(sim *tea.Program) tstea.NewSshModel {
+func newSshModel() tstea.NewSshModel {
 	return func(ctx context.Context, pty ssh.Pty, sess tstea.Session, who *apitype.WhoIsResponse) tea.Model {
 		return &model{
 			ctx: ctx,
-			sim: sim,
 
 			infoModel: &infoModel{
 				term:   pty.Term,
@@ -133,11 +132,10 @@ func newSshModel(sim *tea.Program) tstea.NewSshModel {
 	}
 }
 
-func newHttpModel(sim *tea.Program) tstea.NewHttpModel {
+func newHttpModel() tstea.NewHttpModel {
 	return func(ctx context.Context, sess tstea.Session, who *apitype.WhoIsResponse) tea.Model {
 		return &model{
 			ctx: ctx,
-			sim: sim,
 
 			infoModel: &infoModel{
 				term:   "xterm",
@@ -151,83 +149,6 @@ func newHttpModel(sim *tea.Program) tstea.NewHttpModel {
 
 			table: table.New(),
 		}
-	}
-}
-
-type Client interface {
-	Id() string
-}
-
-// clientInitModel handles initialization logic related to registering with the
-// central simulation. This is required as we can't use Program.Wait() till
-// AFTER the tea.Program has started, but that will be happening asynchronously
-// from the creation point. So we use a Model here to ensure we don't spinoff
-// the disconnection logic till AFTER the program has been started with Run()
-type clientInitModel struct {
-	sim    *tea.Program
-	id     string
-	client *tea.Program
-	model  tea.Model
-}
-
-func (m *clientInitModel) Init() tea.Cmd {
-	return tea.Batch(func() tea.Msg {
-		msg := clientConnectedMsg{
-			id:      m.id,
-			Program: m.client,
-		}
-		m.sim.Send(msg)
-		return nil
-	}, m.model.Init())
-}
-
-func (m *clientInitModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg.(type) {
-	case clientConnectedMsg:
-		go func() {
-			m.client.Wait()
-			m.sim.Send(clientDisconnectedMsg(m.id))
-		}()
-		return m.model, nil
-	}
-	return m, nil
-}
-
-func (m clientInitModel) View() string {
-	return ""
-}
-
-func newProg(sim *tea.Program) tstea.NewTeaProgram {
-	return func(ctx context.Context, m tea.Model, opts ...tea.ProgramOption) *tea.Program {
-		opts = append(opts,
-			tea.WithContext(ctx),
-			tea.WithoutSignalHandler(),
-			tea.WithAltScreen(),
-		)
-
-		init := &clientInitModel{sim: sim}
-		if client, ok := m.(Client); ok {
-			init.id = client.Id()
-			init.model = m
-			m = init
-		}
-
-		p := tea.NewProgram(m, opts...)
-		init.client = p
-
-		// TODO: move this to the simulation program
-		go func() {
-			done := ctx.Done()
-			for {
-				select {
-				case <-done:
-					return
-				case <-time.After(1 * time.Second):
-					p.Send(timeMsg(time.Now()))
-				}
-			}
-		}()
-		return p
 	}
 }
 
@@ -253,40 +174,34 @@ type clientConnectedMsg struct {
 type clientDisconnectedMsg string
 
 type simulation struct {
-	msgs []chatMsg
-
-	clients map[string]*tea.Program
+	broadcaster *ringbuf.RingBuffer[tea.Msg]
 }
 
 func (m *simulation) Init() tea.Cmd {
-	if m.clients == nil {
-		m.clients = make(map[string]*tea.Program, 10)
-	}
 	return nil
 }
 
 func (m *simulation) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case *ringbuf.RingBuffer[tea.Msg]:
+		m.broadcaster = msg
+
 	case chatMsg:
 		msg.simAt = time.Now()
-		m.msgs = append(m.msgs, msg)
-		// TODO: ticker to prune msgs array
-
-		for _, p := range m.clients {
-			p.Send(msg)
+		if m.broadcaster != nil {
+			m.broadcaster.Write(msg)
+			log.Debug("chat", "t", msg.simAt, "lag", msg.simAt.Sub(msg.cliAt), "who", msg.who, "sess", msg.sess, "msg", msg.msg)
+		} else {
+			log.Warn("dropped chat", "t", msg.simAt, "lag", msg.simAt.Sub(msg.cliAt), "who", msg.who, "sess", msg.sess, "msg", msg.msg)
 		}
-		log.Debug("chat", "t", msg.simAt, "lag", msg.simAt.Sub(msg.cliAt), "who", msg.who, "sess", msg.sess, "msg", msg.msg)
 
+		// TODO: re-enable these log messages
 	case clientConnectedMsg:
-		m.clients[msg.id] = msg.Program
+		// m.clients[msg.id] = msg.Program
 		log.Info("connected", "id", msg.id)
-		chat := make([]chatMsg, 0, max(10, len(m.msgs)))
-		chat = append(chat, m.msgs...)
-		msg.Program.Send(msg)
-		msg.Program.Send(chat)
 
 	case clientDisconnectedMsg:
-		delete(m.clients, string(msg))
+		// delete(m.clients, string(msg))
 		log.Info("disconnected", "id", msg)
 	}
 
@@ -300,7 +215,7 @@ func (m *simulation) View() string {
 type model struct {
 	b strings.Builder
 
-	sim *tea.Program
+	Send mpty.Input
 
 	ctx context.Context
 
@@ -332,7 +247,6 @@ func (m *model) At(row, cell int) string {
 }
 
 func (m *model) Rows() int {
-	// return min(len(m.chat), m.ChatViewHeight())
 	return len(m.chat)
 }
 func (m *model) Columns() int { return 3 }
@@ -408,12 +322,22 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.CmdLineExecute())
 		}
 
-	case []chatMsg:
-		m.chat = m.chat[:0]
+	case mpty.Input:
+		m.Send = msg
+
+	case []chatMsg: //TODO: nothing actually sends this anymore
 		m.chat = append(m.chat, msg...)
 		m.table.Offset(max(0, len(m.chat)-m.ChatViewHeight()-1))
-	case chatMsg:
-		m.chat = append(m.chat, msg)
+	case []tea.Msg:
+		for _, msg := range msg {
+			// TODO: do something with errors
+			if chat, ok := msg.(chatMsg); ok {
+				// TODO: switch this over to a ringbuffer
+				m.chat = append(m.chat, chat)
+			} else {
+				log.Warn("ringbuffer read", "error", msg)
+			}
+		}
 		m.table.Offset(max(0, len(m.chat)-m.ChatViewHeight()-1))
 	}
 
@@ -523,15 +447,25 @@ func (m *model) SendChatCmd(msg string) tea.Cmd {
 		who  = m.who.UserProfile.LoginName
 		sess = m.sess.RemoteAddr().String()
 		now  = time.Now()
-	)
-
-	return func() tea.Msg {
-		m.sim.Send(chatMsg{
+		chat = chatMsg{
 			cliAt: now,
 			who:   who,
 			sess:  sess,
 			msg:   msg,
-		})
+		}
+
+		send = m.Send
+	)
+	if send == nil {
+		// TODO: maybe buffer locally till we get a send channel?
+		return nil
+	}
+
+	return func() tea.Msg {
+		select {
+		case <-m.ctx.Done():
+		case send <- chat:
+		}
 		return nil
 	}
 }
@@ -540,16 +474,26 @@ func (m *model) SendCountCmd(i int) tea.Cmd {
 	var (
 		who  = m.who.UserProfile.LoginName
 		sess = m.sess.RemoteAddr().String()
+
+		send = m.Send
 	)
+	if send == nil {
+		// TODO: maybe buffer locally till we get a send channel?
+		return nil
+	}
 
 	return func() tea.Msg {
 		for v := range i {
-			m.sim.Send(chatMsg{
+			chat := chatMsg{
 				cliAt: time.Now(),
 				who:   who,
 				sess:  sess,
 				msg:   fmt.Sprint(v),
-			})
+			}
+			select {
+			case <-m.ctx.Done():
+			case send <- chat:
+			}
 		}
 		return nil
 	}

@@ -12,6 +12,7 @@ require (
 	github.com/charmbracelet/wish v1.4.7
 	github.com/creack/pty v1.1.23
 	github.com/ghthor/gotty/v2 v2.3.5-0.20251026181702-b5d904cb14da
+	github.com/golang-cz/ringbuf v0.0.5
 	github.com/gorilla/websocket v1.5.1
 	github.com/muesli/termenv v0.16.0
 	golang.org/x/sync v0.17.0

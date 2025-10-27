@@ -17,6 +17,7 @@ import (
 	"github.com/creack/pty"
 	"github.com/ghthor/gotty/v2/server"
 	"github.com/ghthor/webwish/ctxhelp"
+	"github.com/ghthor/webwish/mpty"
 	"github.com/gorilla/websocket"
 	"github.com/muesli/termenv"
 	"golang.org/x/sync/errgroup"
@@ -30,9 +31,8 @@ type Session interface {
 
 type NewSshModel func(context.Context, ssh.Pty, Session, *apitype.WhoIsResponse) tea.Model
 type NewHttpModel func(context.Context, Session, *apitype.WhoIsResponse) tea.Model
-type NewTeaProgram func(context.Context, tea.Model, ...tea.ProgramOption) *tea.Program
 
-func WishMiddleware(ctx context.Context, lc *local.Client, newModel NewSshModel, newProg NewTeaProgram) wish.Middleware {
+func WishMiddleware(ctx context.Context, lc *local.Client, newModel NewSshModel, newProg mpty.NewClientProgram) wish.Middleware {
 	teaHandler := func(s ssh.Session) *tea.Program {
 		who, err := lc.WhoIs(s.Context(), s.RemoteAddr().String())
 		if err != nil {
@@ -59,10 +59,10 @@ type TeaTYFactory struct {
 	ts  *local.Client
 
 	newModel NewHttpModel
-	newProg  NewTeaProgram
+	newProg  mpty.NewClientProgram
 }
 
-func NewTeaTYFactory(ctx context.Context, ts *local.Client, newModel NewHttpModel, newProg NewTeaProgram) *TeaTYFactory {
+func NewTeaTYFactory(ctx context.Context, ts *local.Client, newModel NewHttpModel, newProg mpty.NewClientProgram) *TeaTYFactory {
 	return &TeaTYFactory{
 		ctx: ctx,
 		ts:  ts,
