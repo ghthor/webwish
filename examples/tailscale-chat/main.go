@@ -524,10 +524,7 @@ func (m *model) SendChatCmd(msg string) tea.Cmd {
 	}
 
 	return func() tea.Msg {
-		select {
-		case <-m.ctx.Done():
-		case send <- chat:
-		}
+		sendMsg(m.ctx, send, chat)
 		return nil
 	}
 }
@@ -552,11 +549,15 @@ func (m *model) SendCountCmd(i int) tea.Cmd {
 				sess:  sess,
 				msg:   fmt.Sprint(v),
 			}
-			select {
-			case <-m.ctx.Done():
-			case send <- chat:
-			}
+			sendMsg(m.ctx, send, chat)
 		}
 		return nil
+	}
+}
+
+func sendMsg(ctx context.Context, send mpty.Input, msg tea.Msg) {
+	select {
+	case <-ctx.Done():
+	case send <- msg:
 	}
 }
