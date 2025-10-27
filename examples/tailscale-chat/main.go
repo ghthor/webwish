@@ -29,6 +29,7 @@ import (
 	"github.com/ghthor/webwish/mpty"
 	"github.com/ghthor/webwish/tshelper"
 	"github.com/ghthor/webwish/tstea"
+	"github.com/ghthor/webwish/unsafering"
 	"github.com/golang-cz/ringbuf"
 	"golang.org/x/sync/errgroup"
 	"tailscale.com/client/tailscale/apitype"
@@ -127,7 +128,8 @@ func newSshModel() tstea.NewSshModel {
 				who:  who,
 			},
 
-			table: table.New(),
+			table:    table.New(),
+			chatRing: unsafering.NewRingBuffer[chatMsg](300),
 		}
 	}
 }
@@ -139,15 +141,16 @@ func newHttpModel() tstea.NewHttpModel {
 
 			infoModel: &infoModel{
 				term:   "xterm",
-				width:  0,
-				height: 0,
+				width:  80,
+				height: 24,
 				time:   time.Now(),
 
 				sess: sess,
 				who:  who,
 			},
 
-			table: table.New(),
+			table:    table.New(),
+			chatRing: unsafering.NewRingBuffer[chatMsg](300),
 		}
 	}
 }
@@ -227,11 +230,12 @@ type model struct {
 	table   *table.Table
 	view    viewport.Model
 
-	chat []chatMsg
+	// chat     []chatMsg
+	chatRing *unsafering.RingBuffer[chatMsg]
 }
 
 func (m *model) At(row, cell int) string {
-	msg := m.chat[row]
+	msg, _ := m.chatRing.AtInWindow(row, m.chatRing.Len())
 	switch cell {
 	case 0:
 		return msg.simAt.Format(time.TimeOnly)
@@ -247,9 +251,13 @@ func (m *model) At(row, cell int) string {
 }
 
 func (m *model) Rows() int {
-	return len(m.chat)
+	return m.chatRing.Len()
 }
 func (m *model) Columns() int { return 3 }
+
+func (m *model) SetTableOffset() {
+	m.table.Offset(max(0, m.chatRing.Len()-m.ChatViewHeight()-1))
+}
 
 type infoModel struct {
 	b strings.Builder
@@ -314,7 +322,7 @@ func (m *model) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.cmdLine.Width = msg.Width
 		m.ViewportResize()
-		m.table.Offset(max(0, len(m.chat)-m.ChatViewHeight()-1))
+		m.SetTableOffset()
 
 	case mpty.Input:
 		m.Send = msg
@@ -330,8 +338,10 @@ func (m *model) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 		}
 
 	case []chatMsg: //TODO: nothing actually sends this anymore
-		m.chat = append(m.chat, msg...)
-		m.table.Offset(max(0, len(m.chat)-m.ChatViewHeight()-1))
+		for _, c := range msg {
+			m.chatRing.Push(c)
+		}
+		m.SetTableOffset()
 
 	case []tea.Msg:
 		for _, msg := range msg {
@@ -341,14 +351,14 @@ func (m *model) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			case chatMsg:
 				// TODO: switch this over to a ringbuffer
-				m.chat = append(m.chat, msg)
+				m.chatRing.Push(msg)
 			case error:
 				log.Warn("ringbuffer read", "error", msg)
 			default:
 				log.Warnf("unhandled broadcast message type: %T", msg)
 			}
 		}
-		m.table.Offset(max(0, len(m.chat)-m.ChatViewHeight()-1))
+		m.SetTableOffset()
 	}
 
 	m.cmdLine, cmd = m.cmdLine.Update(msg)
