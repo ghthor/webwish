@@ -113,7 +113,7 @@ func main() {
 }
 
 func newSshModel() tstea.NewSshModel {
-	return func(ctx context.Context, pty ssh.Pty, sess tstea.Session, who *apitype.WhoIsResponse) mpty.Model {
+	return func(ctx context.Context, pty ssh.Pty, sess tstea.Session, who *apitype.WhoIsResponse) mpty.ClientModel {
 		return &model{
 			ctx: ctx,
 
@@ -133,7 +133,7 @@ func newSshModel() tstea.NewSshModel {
 }
 
 func newHttpModel() tstea.NewHttpModel {
-	return func(ctx context.Context, sess tstea.Session, who *apitype.WhoIsResponse) mpty.Model {
+	return func(ctx context.Context, sess tstea.Session, who *apitype.WhoIsResponse) mpty.ClientModel {
 		return &model{
 			ctx: ctx,
 
@@ -263,8 +263,8 @@ type infoModel struct {
 	who  *apitype.WhoIsResponse
 }
 
-func (m *infoModel) Id() string {
-	return m.who.UserProfile.LoginName + " " + m.sess.RemoteAddr().String()
+func (m *infoModel) Id() mpty.ClientId {
+	return mpty.ClientId(m.who.UserProfile.LoginName + " " + m.sess.RemoteAddr().String())
 }
 
 func (m *model) Init() tea.Cmd {
@@ -298,6 +298,10 @@ func (m *infoModel) Init() tea.Cmd {
 }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	return m.UpdateClient(msg)
+}
+
+func (m *model) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 	var (
 		cmd  tea.Cmd
 		cmds = m.cmds[:0]
@@ -311,6 +315,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cmdLine.Width = msg.Width
 		m.ViewportResize()
 		m.table.Offset(max(0, len(m.chat)-m.ChatViewHeight()-1))
+
+	case mpty.Input:
+		m.Send = msg
 
 	case tea.KeyMsg:
 		switch msg.String() {

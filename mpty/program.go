@@ -7,16 +7,21 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/log"
 	"github.com/golang-cz/ringbuf"
 	"golang.org/x/sync/errgroup"
 )
 
 type Input chan<- tea.Msg
 
-type Model interface {
+type ClientId string
+
+type ClientModel interface {
 	tea.Model
 
-	Id() string
+	UpdateClient(tea.Msg) (ClientModel, tea.Cmd)
+
+	Id() ClientId
 }
 
 type Program struct {
@@ -37,36 +42,63 @@ type Program struct {
 	broadcast *ringbuf.RingBuffer[tea.Msg]
 }
 
-type Client struct {
-	*tea.Program
-}
-
-type ClientId string
-
-type ClientConnMsg struct {
-	Id     ClientId
-	Client *Client
-}
-
-type ClientDisconnectMsg struct {
-	Id ClientId
-}
+type (
+	ClientConnectMsg    ClientId
+	ClientDisconnectMsg ClientId
+)
 
 type Main struct {
 	broadcaster *ringbuf.RingBuffer[tea.Msg]
 	started     chan struct{}
+	cmds        []tea.Cmd
 
 	tea.Model
 }
 
-func (m Main) Init() tea.Cmd {
+func (m *Main) Init() tea.Cmd {
 	close(m.started)
+	if m.cmds == nil {
+		m.cmds = make([]tea.Cmd, 0, 1)
+	}
 	return tea.Batch(
 		func() tea.Msg {
 			return m.broadcaster
 		},
+		tea.Tick(time.Second, func(t time.Time) tea.Msg { return t }),
 		m.Model.Init(),
 	)
+}
+
+func (m *Main) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var (
+		cmd  tea.Cmd
+		cmds = m.cmds[:0]
+	)
+
+	switch msg := msg.(type) {
+	case ClientConnectMsg:
+		// m.clients[msg.id] = msg.Program
+		log.Info("connected", "id", msg)
+
+	case ClientDisconnectMsg:
+		// delete(m.clients, string(msg))
+		log.Info("disconnected", "id", msg)
+
+	case time.Time:
+		// These ticks are important for periodically waking any subscribers
+		// that may need to exit but are completely caught up and sitting on
+		// the wake condition. Becuase of this race, if the subscriber is
+		// waiting and the broadcast channel is quiet the tea.Program can never
+		// exit. These ticks ensure that any tea.Program will get to exit when
+		// it has a running command that is stuck on a subscriber holding the
+		// ringbuffer mutex
+		m.broadcaster.Write(msg)
+		cmds = append(cmds, tea.Tick(time.Second, func(t time.Time) tea.Msg { return t }))
+	}
+
+	m.Model, cmd = m.Model.Update(msg)
+	cmds = append(cmds, cmd)
+	return m, tea.Batch(cmds...)
 }
 
 func NewProgram(ctx context.Context, cancel context.CancelCauseFunc, m tea.Model) Program {
@@ -74,7 +106,7 @@ func NewProgram(ctx context.Context, cancel context.CancelCauseFunc, m tea.Model
 	started := make(chan struct{})
 
 	p := tea.NewProgram(
-		Main{
+		&Main{
 			broadcaster: broadcaster,
 			started:     started,
 			Model:       m,
@@ -125,14 +157,20 @@ func (p Program) RunIn(grp *errgroup.Group) (started chan struct{}) {
 	return p.started
 }
 
-type NewClientProgram func(context.Context, Model, ...tea.ProgramOption) *tea.Program
+type NewClientProgram func(context.Context, ClientModel, ...tea.ProgramOption) *tea.Program
 
 type ClientMain struct {
 	Input
-	tea.Model
+	ClientModel
 
 	subscriber *ringbuf.Subscriber[tea.Msg]
 	msgs       []tea.Msg
+
+	// The tea.Program does not safe way to wait for it to exit until AFTER it
+	// has started running. So to schedule disconnect messages when the program
+	// exits, we have to wait till the model Init() func is called and return a
+	// tea.Cmd to wait on it
+	program *tea.Program
 }
 
 func (m *ClientMain) Init() tea.Cmd {
@@ -140,12 +178,25 @@ func (m *ClientMain) Init() tea.Cmd {
 		m.msgs = make([]tea.Msg, 0, 100)
 	}
 
+	id := m.Id()
+
 	return tea.Batch(
 		func() tea.Msg {
 			return m.Input
 		},
+		func() tea.Msg {
+			// TODO: these bare ch sends could leak, but I'm pretty sure only
+			// when the Main program is exitting so the who process would be
+			// about to exit
+			m.Input <- ClientConnectMsg(id)
+			return tea.Cmd(func() tea.Msg {
+				m.program.Wait()
+				m.Input <- ClientDisconnectMsg(id)
+				return nil
+			})
+		},
 		m.ReadMsgsCmd(),
-		m.Model.Init(),
+		m.ClientModel.Init(),
 	)
 }
 
@@ -162,7 +213,7 @@ func (m *ClientMain) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.ReadMsgsCmd())
 	}
 
-	m.Model, cmd = m.Model.Update(msg)
+	m.ClientModel, cmd = m.ClientModel.UpdateClient(msg)
 	cmds = append(cmds, cmd)
 	return m, tea.Batch(cmds...)
 }
@@ -191,25 +242,27 @@ func (m *ClientMain) ReadMsgsCmd() tea.Cmd {
 				return m.msgs
 			}
 			m.msgs = append(m.msgs, msg)
-
 		}
 	}
 }
 
 func (p Program) NewClientProgram() NewClientProgram {
-	return func(ctx context.Context, m Model, opts ...tea.ProgramOption) *tea.Program {
+	return func(ctx context.Context, m ClientModel, opts ...tea.ProgramOption) *tea.Program {
 		opts = append(opts,
 			tea.WithContext(ctx),
 			tea.WithoutSignalHandler(),
 			tea.WithAltScreen(),
 		)
 		sub := p.broadcast.Subscribe(ctx, &ringbuf.SubscribeOpts{
-			Name:        m.Id(),
+			Name:        string(m.Id()),
 			StartBehind: 100,
 			MaxBehind:   1000,
 		})
 
-		return tea.NewProgram(&ClientMain{p.Send, m, sub, nil}, opts...)
+		main := &ClientMain{p.Send, m, sub, nil, nil}
+		p := tea.NewProgram(main, opts...)
+		main.program = p
+		return p
 	}
 
 }
