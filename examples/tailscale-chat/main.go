@@ -391,6 +391,7 @@ func (m *model) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 			case mpty.ClientDisconnectMsg:
 
 			case error:
+				m.err = msg
 				log.Warn("client fatal", "error", msg, "who", m.who.UserProfile.LoginName, "sess", m.sess.RemoteAddr().String())
 				return m, tea.Quit
 			default:
