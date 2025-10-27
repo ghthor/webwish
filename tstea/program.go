@@ -29,8 +29,8 @@ type Session interface {
 	RemoteAddr() net.Addr
 }
 
-type NewSshModel func(context.Context, ssh.Pty, Session, *apitype.WhoIsResponse) tea.Model
-type NewHttpModel func(context.Context, Session, *apitype.WhoIsResponse) tea.Model
+type NewSshModel func(context.Context, ssh.Pty, Session, *apitype.WhoIsResponse) mpty.Model
+type NewHttpModel func(context.Context, Session, *apitype.WhoIsResponse) mpty.Model
 
 func WishMiddleware(ctx context.Context, lc *local.Client, newModel NewSshModel, newProg mpty.NewClientProgram) wish.Middleware {
 	teaHandler := func(s ssh.Session) *tea.Program {

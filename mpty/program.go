@@ -13,6 +13,12 @@ import (
 
 type Input chan<- tea.Msg
 
+type Model interface {
+	tea.Model
+
+	Id() string
+}
+
 type Program struct {
 	ctx     context.Context
 	cancel  context.CancelCauseFunc
@@ -119,7 +125,7 @@ func (p Program) RunIn(grp *errgroup.Group) (started chan struct{}) {
 	return p.started
 }
 
-type NewClientProgram func(context.Context, tea.Model, ...tea.ProgramOption) *tea.Program
+type NewClientProgram func(context.Context, Model, ...tea.ProgramOption) *tea.Program
 
 type ClientMain struct {
 	Input
@@ -191,14 +197,14 @@ func (m *ClientMain) ReadMsgsCmd() tea.Cmd {
 }
 
 func (p Program) NewClientProgram() NewClientProgram {
-	return func(ctx context.Context, m tea.Model, opts ...tea.ProgramOption) *tea.Program {
+	return func(ctx context.Context, m Model, opts ...tea.ProgramOption) *tea.Program {
 		opts = append(opts,
 			tea.WithContext(ctx),
 			tea.WithoutSignalHandler(),
 			tea.WithAltScreen(),
 		)
 		sub := p.broadcast.Subscribe(ctx, &ringbuf.SubscribeOpts{
-			Name:        "TODO",
+			Name:        m.Id(),
 			StartBehind: 100,
 			MaxBehind:   1000,
 		})

@@ -113,7 +113,7 @@ func main() {
 }
 
 func newSshModel() tstea.NewSshModel {
-	return func(ctx context.Context, pty ssh.Pty, sess tstea.Session, who *apitype.WhoIsResponse) tea.Model {
+	return func(ctx context.Context, pty ssh.Pty, sess tstea.Session, who *apitype.WhoIsResponse) mpty.Model {
 		return &model{
 			ctx: ctx,
 
@@ -133,7 +133,7 @@ func newSshModel() tstea.NewSshModel {
 }
 
 func newHttpModel() tstea.NewHttpModel {
-	return func(ctx context.Context, sess tstea.Session, who *apitype.WhoIsResponse) tea.Model {
+	return func(ctx context.Context, sess tstea.Session, who *apitype.WhoIsResponse) mpty.Model {
 		return &model{
 			ctx: ctx,
 
