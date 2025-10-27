@@ -329,20 +329,23 @@ func (m *model) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 			cmds = append(cmds, m.CmdLineExecute())
 		}
 
-	case mpty.Input:
-		m.Send = msg
-
 	case []chatMsg: //TODO: nothing actually sends this anymore
 		m.chat = append(m.chat, msg...)
 		m.table.Offset(max(0, len(m.chat)-m.ChatViewHeight()-1))
+
 	case []tea.Msg:
 		for _, msg := range msg {
-			// TODO: do something with errors
-			if chat, ok := msg.(chatMsg); ok {
+			switch msg := msg.(type) {
+			case time.Time:
+				m.infoModel, cmd = m.UpdateInfo(msg)
+				cmds = append(cmds, cmd)
+			case chatMsg:
 				// TODO: switch this over to a ringbuffer
-				m.chat = append(m.chat, chat)
-			} else {
+				m.chat = append(m.chat, msg)
+			case error:
 				log.Warn("ringbuffer read", "error", msg)
+			default:
+				log.Warnf("unhandled broadcast message type: %T", msg)
 			}
 		}
 		m.table.Offset(max(0, len(m.chat)-m.ChatViewHeight()-1))
@@ -361,8 +364,10 @@ func (m *infoModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *infoModel) UpdateInfo(msg tea.Msg) (*infoModel, tea.Cmd) {
 	switch msg := msg.(type) {
-	case timeMsg:
-		m.time = time.Time(msg)
+
+	case time.Time:
+		m.time = msg
+
 	case tea.WindowSizeMsg:
 		m.height = msg.Height
 		m.width = msg.Width

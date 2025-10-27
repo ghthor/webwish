@@ -109,6 +109,7 @@ func (f *TeaTYFactory) New(ctx context.Context, params map[string][]string, conn
 			return err
 		}
 
+		cancel(nil)
 		return nil
 	})
 
