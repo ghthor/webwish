@@ -12,6 +12,12 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+const (
+	broadcastRingSz    = 10000
+	broadcastLookback  = 7000
+	broadcaseMaxBehind = 9000
+)
+
 type Input chan<- tea.Msg
 
 type ClientId string
@@ -102,7 +108,7 @@ func (m *Main) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func NewProgram(ctx context.Context, cancel context.CancelCauseFunc, m tea.Model) Program {
-	broadcaster := ringbuf.New[tea.Msg](10000)
+	broadcaster := ringbuf.New[tea.Msg](broadcastRingSz)
 	started := make(chan struct{})
 
 	p := tea.NewProgram(
@@ -255,8 +261,8 @@ func (p Program) NewClientProgram() NewClientProgram {
 		)
 		sub := p.broadcast.Subscribe(ctx, &ringbuf.SubscribeOpts{
 			Name:        string(m.Id()),
-			StartBehind: 100,
-			MaxBehind:   1000,
+			StartBehind: broadcastLookback,
+			MaxBehind:   broadcaseMaxBehind,
 		})
 
 		main := &ClientMain{p.Send, m, sub, nil, nil}
