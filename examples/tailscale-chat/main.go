@@ -8,6 +8,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"net"
 	"os/signal"
@@ -35,10 +36,13 @@ import (
 	"tailscale.com/client/tailscale/apitype"
 )
 
-const (
-	sshPort  = 23234
-	httpPort = 28080
+var (
+	sshPort  int    = 23234
+	httpPort int    = 28080
+	hostname string = "tailscale-chat"
+)
 
+const (
 	systemNick = "system"
 )
 
@@ -53,6 +57,12 @@ var (
 )
 
 func main() {
+	flag.IntVar(&sshPort, "ssh-port", 23234, "port for ssh listener")
+	flag.IntVar(&httpPort, "http-port", 28080, "port for http listener")
+	flag.StringVar(&hostname, "hostname", "tailscale-chat", "tailscale device hostname")
+
+	flag.Parse()
+
 	ctx, cancel := context.WithCancelCause(context.Background())
 	rootCtx := ctx
 
@@ -67,7 +77,7 @@ func main() {
 	case <-mainprog.RunIn(grp):
 	}
 
-	ts, err := tshelper.NewListeners("webwish", sshPort, httpPort)
+	ts, err := tshelper.NewListeners(hostname, sshPort, httpPort)
 	if err != nil {
 		log.Fatal("tailscale %w", err)
 	}
