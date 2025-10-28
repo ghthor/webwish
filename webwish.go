@@ -41,7 +41,7 @@ func ShutdownSSH(s *ssh.Server, timeout time.Duration) error {
 	return nil
 }
 
-func RunHTTP(ctx context.Context, grp *errgroup.Group, cancel context.CancelCauseFunc, l net.Listener, fact server.Factory) error {
+func RunHTTP(ctx context.Context, grp *errgroup.Group, cancel context.CancelCauseFunc, l net.Listener, fact server.Factory, hostname string) error {
 	var (
 		err        error
 		appOptions = &server.Options{}
@@ -56,6 +56,10 @@ func RunHTTP(ctx context.Context, grp *errgroup.Group, cancel context.CancelCaus
 	}
 	appOptions.Preferences.EnableWebGL = true
 	appOptions.PermitWrite = true
+	appOptions.TitleFormat = "{{ .hostname }}"
+	appOptions.TitleVariables = map[string]any{
+		"hostname": hostname,
+	}
 
 	if err = appOptions.Validate(); err != nil {
 		return fmt.Errorf("gotty options validation failure: %w", err)

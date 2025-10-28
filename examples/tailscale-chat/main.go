@@ -107,7 +107,7 @@ func main() {
 		webwish.RunSSH(grpCtx, grp, cancel, ts.Ssh, s),
 		webwish.RunHTTP(grpCtx, grp, cancel, ts.Http, tstea.NewTeaTYFactory(
 			ctx, ts.Client, newHttpModel(), mainprog.NewClientProgram(),
-		)),
+		), hostname),
 	)
 	if err != nil {
 		log.Fatal("failed to start webwish", "error", err)
