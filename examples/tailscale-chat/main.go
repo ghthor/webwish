@@ -157,7 +157,7 @@ func newSshModel() tstea.NewSshModel {
 			},
 
 			table:    table.New(),
-			chatRing: unsafering.NewRingBuffer[chatMsg](300),
+			chatView: unsafering.NewRingBuffer[chatMsg](300),
 		}
 	}
 }
@@ -178,7 +178,7 @@ func newHttpModel() tstea.NewHttpModel {
 			},
 
 			table:    table.New(),
-			chatRing: unsafering.NewRingBuffer[chatMsg](300),
+			chatView: unsafering.NewRingBuffer[chatMsg](300),
 		}
 	}
 }
@@ -188,6 +188,7 @@ type timeMsg time.Time
 type chatMsg struct {
 	cliAt time.Time
 	simAt time.Time
+	nick  string
 	who   string
 	sess  string
 	msg   string
@@ -197,13 +198,51 @@ func (m chatMsg) Id() string {
 	return m.who + " " + m.sess
 }
 
+func (m chatMsg) Nick() string {
+	if m.nick == "" {
+		return nickFromWho(m.who)
+
+	}
+	return m.nick
+}
+
+func (m chatMsg) SetNick(s ...string) chatMsg {
+	if m.nick != "" && len(s) == 0 {
+		return m
+	}
+	if len(s) == 0 {
+		m.nick = nickFromWho(m.who)
+	} else {
+		m.nick = s[0]
+	}
+	return m
+}
+
+func nickFromWho(who string) string {
+	nick, _, match := strings.Cut(who, "@")
+	if match {
+		return nick
+	}
+	return who
+}
+
+type namesMsg struct {
+	id    mpty.ClientId
+	names []string
+}
+
 type chatServer struct {
 	broadcaster *ringbuf.RingBuffer[tea.Msg]
 
 	tick time.Time
+
+	names map[string]map[string]time.Time
 }
 
 func (m *chatServer) Init() tea.Cmd {
+	if m.names == nil {
+		m.names = make(map[string]map[string]time.Time, 10)
+	}
 	return tea.Batch(func() tea.Msg { return time.Now() })
 }
 
@@ -214,6 +253,7 @@ func (m *chatServer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case chatMsg:
 		msg.simAt = time.Now()
+		msg = msg.SetNick()
 
 		if m.broadcaster != nil {
 			m.broadcaster.Write(msg)
@@ -222,13 +262,40 @@ func (m *chatServer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			log.Warn("dropped chat", "t", msg.simAt, "lag", msg.simAt.Sub(msg.cliAt), "who", msg.who, "sess", msg.sess, "msg", msg.msg)
 		}
 
+	case namesMsg:
+		msg.names = slices.Sorted(maps.Keys(m.names))
+		for i := range msg.names {
+			msg.names[i] = nickFromWho(msg.names[i])
+		}
+		m.broadcaster.Write(msg)
+
 	case mpty.ClientConnectMsg:
+		who, sess, _ := strings.Cut(string(msg), " ")
+
+		sessions, ok := m.names[who]
+		if !ok {
+			m.names[who] = map[string]time.Time{sess: m.tick}
+		} else {
+			sessions[sess] = m.tick
+		}
+
 		m.broadcaster.Write(chatMsg{
 			simAt: m.tick,
 			who:   systemNick,
 			msg:   fmt.Sprintf("%s connected", msg),
 		})
+
 	case mpty.ClientDisconnectMsg:
+		who, sess, _ := strings.Cut(string(msg), " ")
+
+		sessions, ok := m.names[who]
+		if ok {
+			delete(sessions, sess)
+		}
+		if len(sessions) == 0 {
+			delete(m.names, who)
+		}
+
 		m.broadcaster.Write(chatMsg{
 			simAt: m.tick,
 			who:   systemNick,
@@ -261,7 +328,7 @@ type model struct {
 	table   *table.Table
 	view    viewport.Model
 
-	chatRing *unsafering.RingBuffer[chatMsg]
+	chatView *unsafering.RingBuffer[chatMsg]
 
 	quiet bool
 
@@ -276,7 +343,7 @@ func (m *model) Err() error {
 }
 
 func (m *model) AtRaw(row int) chatMsg {
-	msg, _ := m.chatRing.AtInWindow(row, m.chatRing.Len())
+	msg, _ := m.chatView.AtInWindow(row, m.chatView.Len())
 	return msg
 }
 
@@ -296,8 +363,7 @@ func (m *model) At(row, cell int) string {
 		}
 		return msg.simAt.Format(time.TimeOnly)
 	case COL_WHO:
-		id, _, _ := strings.Cut(msg.who, "@")
-		return " " + id
+		return " " + msg.Nick()
 	case COL_MSG:
 		return " | " + msg.msg
 	default:
@@ -307,12 +373,12 @@ func (m *model) At(row, cell int) string {
 }
 
 func (m *model) Rows() int {
-	return m.chatRing.Len()
+	return m.chatView.Len()
 }
 func (m *model) Columns() int { return 3 }
 
 func (m *model) SetTableOffset() {
-	m.table.Offset(max(0, m.chatRing.Len()-m.ChatViewHeight()-1))
+	m.table.Offset(max(0, m.chatView.Len()-m.ChatViewHeight()-1))
 }
 
 type infoModel struct {
@@ -417,7 +483,14 @@ func (m *model) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 			case chatMsg:
 				if m.quiet && msg.who == systemNick {
 				} else {
-					m.chatRing.Push(msg)
+					m.chatView.Push(msg)
+				}
+			case namesMsg:
+				if msg.id == m.Id() {
+					m.chatView.Push(chatMsg{
+						who: systemNick,
+						msg: fmt.Sprintf("-> %d connected: %s", len(msg.names), strings.Join(msg.names, ", ")),
+					})
 				}
 
 			case mpty.ClientConnectMsg:
@@ -535,8 +608,16 @@ func (m *model) CmdLineExecute() tea.Cmd {
 		return nil
 	}
 
+	// TODO: maybe style these type of messages differently?
+	m.chatView.Push(chatMsg{
+		simAt: m.time,
+		who:   m.who.UserProfile.LoginName,
+		sess:  m.sess.RemoteAddr().String(),
+		msg:   value,
+	})
+
 	if c, ok := commands[cmd]; ok {
-		return c.fn(m, rest)
+		return c.fn(m, cmd, rest)
 	}
 
 	return nil
@@ -608,7 +689,7 @@ func formatToggle(b bool) string {
 	return "OFF"
 }
 
-type commandFn func(*model, string) tea.Cmd
+type commandFn func(m *model, cmd, rest string) tea.Cmd
 
 type command struct {
 	fn commandFn
@@ -628,7 +709,6 @@ func mkCommand(f commandFn) command {
 /focus [USER ...]          - Only show messages from focused users, or $ to reset.
 /ignore [USER]             - Hide messages from USER, /unignore USER to stop hiding.
 /msg USER MESSAGE          - Send MESSAGE to USER.
-/names                     - List users who are connected.
 /nick NAME                 - Rename yourself.
 /reply MESSAGE             - Reply with MESSAGE to the previous private message.
 /theme [colors|...]        - Set your color theme.
@@ -636,15 +716,16 @@ func mkCommand(f commandFn) command {
 /whois USER                - Information about USER.
 */
 var commands = map[string]command{
-	"/help": mkCommand(func(m *model, argstr string) tea.Cmd {
+	"/help": mkCommand(func(m *model, _, _ string) tea.Cmd {
 		m.cmdLine.Placeholder = ""
-		m.chatRing.Push(chatMsg{
+		m.chatView.Push(chatMsg{
 			cliAt: m.time,
 			who:   helpNick,
 			msg: strings.TrimLeftFunc(`
 Type out a message and press <enter> or use a command
 
 -> Available commands:
+/names                     - List users who are connected.
 /quiet                     - Toggle system announcements.
 /exit                      - Exit the chat (aliases: /quit, /q) Ctrl+c will also quit
 
@@ -655,9 +736,23 @@ Type out a message and press <enter> or use a command
 		return nil
 	}),
 
-	"/quiet": mkCommand(func(m *model, s string) tea.Cmd {
+	"/names": mkCommand(func(m *model, cmd, _ string) tea.Cmd {
+		var (
+			req  = namesMsg{id: m.Id()}
+			send = m.Send
+		)
+		return func() tea.Msg {
+			select {
+			case <-m.ctx.Done():
+			case send <- req:
+			}
+			return nil
+		}
+	}),
+
+	"/quiet": mkCommand(func(m *model, cmd, _ string) tea.Cmd {
 		m.quiet = !m.quiet
-		m.chatRing.Push(chatMsg{
+		m.chatView.Push(chatMsg{
 			cliAt: m.time,
 			who:   infoNick,
 			msg:   fmt.Sprintf("Quiet mode toggled %s", formatToggle(m.quiet)),
@@ -665,18 +760,18 @@ Type out a message and press <enter> or use a command
 		return nil
 	}),
 
-	"/debug_perf": mkCommand(func(m *model, s string) tea.Cmd {
-		i, err := strconv.Atoi(s)
+	"/debug_perf": mkCommand(func(m *model, cmd, args string) tea.Cmd {
+		i, err := strconv.Atoi(args)
 		if err != nil {
 			return m.SendChatCmd(fmt.Sprintf("%s => %v", m.cmdLine.Value(), err))
 		}
 		return m.SendCountCmd(i)
 	}),
 
-	"/exit": mkCommand(func(m *model, argstr string) tea.Cmd {
+	"/exit": mkCommand(func(m *model, cmd, _ string) tea.Cmd {
 		return tea.Quit
 	}),
-	"/quit": mkCommand(func(m *model, argstr string) tea.Cmd {
+	"/quit": mkCommand(func(m *model, cmd, _ string) tea.Cmd {
 		return tea.Quit
 	}),
 }
