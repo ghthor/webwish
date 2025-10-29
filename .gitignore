@@ -2,3 +2,4 @@
 .ssh/
 go.work*
 gotty/
+msgs.db

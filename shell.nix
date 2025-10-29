@@ -30,6 +30,7 @@ pkgs.mkShell {
       gomod2nix
 
 
+      litecli # sqlite TUI
       # pgcli
       # postgresql
 

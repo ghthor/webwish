@@ -21,10 +21,10 @@ import (
 	"github.com/charmbracelet/ssh"
 	"github.com/charmbracelet/wish"
 	"github.com/charmbracelet/wish/logging"
-	"github.com/ghthor/webwish"
-	"github.com/ghthor/webwish/mpty"
-	"github.com/ghthor/webwish/tshelper"
-	"github.com/ghthor/webwish/tstea"
+	"github.com/ghthor/webtea"
+	"github.com/ghthor/webtea/mpty"
+	"github.com/ghthor/webtea/tshelper"
+	"github.com/ghthor/webtea/tstea"
 	"golang.org/x/sync/errgroup"
 	"tailscale.com/client/tailscale/apitype"
 )
@@ -41,7 +41,7 @@ func main() {
 	ctx, sigCancel := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer sigCancel()
 
-	ts, err := tshelper.NewListeners("webwish", sshPort, httpPort)
+	ts, err := tshelper.NewListeners("webtea", sshPort, httpPort)
 	if err != nil {
 		log.Fatal("tailscale %w", err)
 	}
@@ -69,22 +69,22 @@ func main() {
 
 	grp, grpCtx := errgroup.WithContext(ctx)
 	err = errors.Join(
-		webwish.RunSSH(grpCtx, grp, cancel, ts.Ssh, s),
-		webwish.RunHTTP(grpCtx, grp, cancel, ts.Http, tstea.NewTeaTYFactory(
+		webtea.RunSSH(grpCtx, grp, cancel, ts.Ssh, s),
+		webtea.RunHTTP(grpCtx, grp, cancel, ts.Http, tstea.NewTeaTYFactory(
 			ctx, ts.Client, newHttpModel, newProg,
-		)),
+		), "webtty"),
 	)
 	if err != nil {
-		log.Fatal("failed to start webwish", "error", err)
+		log.Fatal("failed to start webtea", "error", err)
 	}
 
 	<-ctx.Done()
 	if err = context.Cause(rootCtx); err != nil && !errors.Is(err, context.Canceled) {
-		log.Error("failed to start webwish", "error", err)
+		log.Error("failed to start webtea", "error", err)
 	}
 
 	log.Info("Stopping SSH server")
-	err = webwish.ShutdownSSH(s, 30*time.Second)
+	err = webtea.ShutdownSSH(s, 30*time.Second)
 	if err != nil {
 		log.Error("Could not stop server", "error", err)
 	}
@@ -94,7 +94,7 @@ func main() {
 	}
 }
 
-func newSshModel(ctx context.Context, pty ssh.Pty, sess tstea.Session, who *apitype.WhoIsResponse) mpty.ClientModel {
+func newSshModel(ctx context.Context, pty ssh.Pty, sess mpty.Session, who *apitype.WhoIsResponse) mpty.ClientModel {
 	return &model{
 		ctx:    ctx,
 		term:   pty.Term,
@@ -107,7 +107,7 @@ func newSshModel(ctx context.Context, pty ssh.Pty, sess tstea.Session, who *apit
 	}
 }
 
-func newHttpModel(ctx context.Context, sess tstea.Session, who *apitype.WhoIsResponse) mpty.ClientModel {
+func newHttpModel(ctx context.Context, sess mpty.Session, who *apitype.WhoIsResponse) mpty.ClientModel {
 	return &model{
 		ctx:    ctx,
 		term:   "xterm",
@@ -152,7 +152,7 @@ type model struct {
 	height int
 	time   time.Time
 
-	sess tstea.Session
+	sess mpty.Session
 	who  *apitype.WhoIsResponse
 }
 
@@ -205,4 +205,8 @@ func (m *model) View() string {
 	fmt.Fprintln(b, "\n[q]uit")
 
 	return b.String()
+}
+
+func (m *model) Err() error {
+	return nil
 }

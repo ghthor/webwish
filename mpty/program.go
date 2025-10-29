@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/log"
+	"github.com/ghthor/webtea/mpty/mptymsg"
 	"github.com/golang-cz/ringbuf"
 	"golang.org/x/sync/errgroup"
 )
@@ -31,6 +32,11 @@ type ClientModel interface {
 	Err() error
 }
 
+type Recorder interface {
+	Save(mptymsg.Recordable) (mptymsg.Recordable, error)
+	Read(int) ([]mptymsg.Recordable, error)
+}
+
 type Program struct {
 	ctx     context.Context
 	cancel  context.CancelCauseFunc
@@ -52,10 +58,21 @@ type Program struct {
 type (
 	ClientConnectMsg    ClientId
 	ClientDisconnectMsg ClientId
+
+	subReq struct {
+		ctx  context.Context
+		id   ClientId
+		resp chan<- subResp
+	}
+	subResp struct {
+		initialMsgs []mptymsg.Recordable
+		subscriber  *ringbuf.Subscriber[tea.Msg]
+	}
 )
 
 type Main struct {
 	broadcaster *ringbuf.RingBuffer[tea.Msg]
+	recorder    Recorder
 	started     chan struct{}
 	cmds        []tea.Cmd
 
@@ -71,7 +88,7 @@ func (m *Main) Init() tea.Cmd {
 		func() tea.Msg {
 			return m.broadcaster
 		},
-		tea.Tick(time.Second, func(t time.Time) tea.Msg { return t }),
+		tea.Every(time.Second, func(t time.Time) tea.Msg { return t }),
 		m.Model.Init(),
 	)
 }
@@ -82,7 +99,41 @@ func (m *Main) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = m.cmds[:0]
 	)
 
+	switch rec := msg.(type) {
+	case mptymsg.Recordable:
+		var err error
+		rec, err = m.recorder.Save(rec)
+		if err != nil {
+			log.Warn("message recording", "error", err)
+		} else {
+			msg = rec
+		}
+	}
+
 	switch msg := msg.(type) {
+	case subReq:
+		// TODO: configurable default read len
+		init, err := m.recorder.Read(100)
+		if err != nil {
+			log.Warn("failed to load recorded messages", "error", err)
+		}
+
+		sub := m.broadcaster.Subscribe(msg.ctx, &ringbuf.SubscribeOpts{
+			Name:        string(msg.id),
+			StartBehind: 0,
+			MaxBehind:   broadcaseMaxBehind,
+		})
+		return m, func() tea.Msg {
+			select {
+			case <-msg.ctx.Done():
+			case msg.resp <- subResp{
+				initialMsgs: init,
+				subscriber:  sub,
+			}:
+			}
+			return nil
+		}
+
 	case ClientConnectMsg:
 		log.Info("connected", "id", msg)
 		m.broadcaster.Write(msg)
@@ -100,7 +151,7 @@ func (m *Main) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// it has a running command that is stuck on a subscriber holding the
 		// ringbuffer mutex
 		m.broadcaster.Write(msg)
-		cmds = append(cmds, tea.Tick(time.Second, func(t time.Time) tea.Msg { return t }))
+		cmds = append(cmds, tea.Every(time.Second, func(t time.Time) tea.Msg { return t }))
 	}
 
 	m.Model, cmd = m.Model.Update(msg)
@@ -108,13 +159,14 @@ func (m *Main) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func NewProgram(ctx context.Context, cancel context.CancelCauseFunc, m tea.Model) Program {
+func NewProgram(ctx context.Context, cancel context.CancelCauseFunc, m tea.Model, r Recorder) Program {
 	broadcaster := ringbuf.New[tea.Msg](broadcastRingSz)
 	started := make(chan struct{})
 
 	p := tea.NewProgram(
 		&Main{
 			broadcaster: broadcaster,
+			recorder:    r,
 			started:     started,
 			Model:       m,
 		},
@@ -138,13 +190,17 @@ func NewProgram(ctx context.Context, cancel context.CancelCauseFunc, m tea.Model
 	}
 }
 
-func (p Program) RunIn(grp *errgroup.Group) (started chan struct{}) {
+func (p Program) StartIn(ctx context.Context, grp *errgroup.Group) error {
 	grp.Go(func() error {
 		_, serr := p.Program.Run()
 		if serr != nil && !errors.Is(serr, context.Canceled) {
 			p.cancel(serr)
 			return serr
 		}
+
+		// Send one last pulse on the the ringbuffer unblock any subscribers
+		p.broadcast.Write(ctx.Err())
+
 		return nil
 	})
 	// Start a many to one input reader and wrap the unfortunate blocking Send() API
@@ -161,7 +217,13 @@ func (p Program) RunIn(grp *errgroup.Group) (started chan struct{}) {
 			}
 		}
 	})
-	return p.started
+
+	select {
+	case <-ctx.Done():
+		return p.ctx.Err()
+	case <-p.started:
+		return nil
+	}
 }
 
 type NewClientProgram func(context.Context, ClientModel, ...tea.ProgramOption) *tea.Program
@@ -170,8 +232,9 @@ type ClientMain struct {
 	Input
 	ClientModel
 
-	subscriber *ringbuf.Subscriber[tea.Msg]
-	msgs       []tea.Msg
+	initialMsgs []mptymsg.Recordable
+	subscriber  *ringbuf.Subscriber[tea.Msg]
+	msgs        []tea.Msg
 
 	// The tea.Program does not have safe way to wait for it to exit until
 	// AFTER it has started running. So to schedule disconnect messages when
@@ -187,7 +250,8 @@ func (m *ClientMain) Init() tea.Cmd {
 
 	id := m.Id()
 
-	return tea.Batch(
+	return tea.Sequence(
+		m.ClientModel.Init(),
 		func() tea.Msg {
 			return m.Input
 		},
@@ -202,8 +266,12 @@ func (m *ClientMain) Init() tea.Cmd {
 				return nil
 			})
 		},
+		func() tea.Msg {
+			msgs := m.initialMsgs
+			m.initialMsgs = nil
+			return msgs
+		},
 		m.ReadMsgsCmd(),
-		m.ClientModel.Init(),
 	)
 }
 
@@ -260,13 +328,22 @@ func (p Program) NewClientProgram() NewClientProgram {
 			tea.WithoutSignalHandler(),
 			tea.WithAltScreen(),
 		)
-		sub := p.broadcast.Subscribe(ctx, &ringbuf.SubscribeOpts{
-			Name:        string(m.Id()),
-			StartBehind: broadcastLookback,
-			MaxBehind:   broadcaseMaxBehind,
-		})
 
-		main := &ClientMain{p.Send, m, sub, nil, nil}
+		respCh := make(chan subResp, 1)
+		select {
+		case <-ctx.Done():
+			return nil
+		case p.Send <- subReq{ctx, m.Id(), respCh}:
+		}
+
+		var resp subResp
+		select {
+		case <-ctx.Done():
+			return nil
+		case resp = <-respCh:
+		}
+
+		main := &ClientMain{p.Send, m, resp.initialMsgs, resp.subscriber, nil, nil}
 		p := tea.NewProgram(main, opts...)
 		main.program = p
 		return p

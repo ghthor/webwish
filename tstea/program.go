@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"time"
 
@@ -16,8 +15,8 @@ import (
 	"github.com/charmbracelet/wish/bubbletea"
 	"github.com/creack/pty"
 	"github.com/ghthor/gotty/v2/server"
-	"github.com/ghthor/webwish/ctxhelp"
-	"github.com/ghthor/webwish/mpty"
+	"github.com/ghthor/webtea/ctxhelp"
+	"github.com/ghthor/webtea/mpty"
 	"github.com/gorilla/websocket"
 	"github.com/muesli/termenv"
 	"golang.org/x/sync/errgroup"
@@ -25,12 +24,8 @@ import (
 	"tailscale.com/client/tailscale/apitype"
 )
 
-type Session interface {
-	RemoteAddr() net.Addr
-}
-
-type NewSshModel func(context.Context, ssh.Pty, Session, *apitype.WhoIsResponse) mpty.ClientModel
-type NewHttpModel func(context.Context, Session, *apitype.WhoIsResponse) mpty.ClientModel
+type NewSshModel func(context.Context, ssh.Pty, mpty.Session, *apitype.WhoIsResponse) mpty.ClientModel
+type NewHttpModel func(context.Context, mpty.Session, *apitype.WhoIsResponse) mpty.ClientModel
 
 func WishMiddleware(ctx context.Context, lc *local.Client, newModel NewSshModel, newProg mpty.NewClientProgram) wish.Middleware {
 	teaHandler := func(s ssh.Session) *tea.Program {
@@ -94,6 +89,12 @@ func (f *TeaTYFactory) New(ctx context.Context, params map[string][]string, conn
 		tea.WithInput(t),
 		tea.WithOutput(t),
 	)
+	if prog == nil {
+		t.Close()
+		p.Close()
+		conn.Close()
+		return nil, fmt.Errorf("program initialization failed: %w", ctx.Err())
+	}
 
 	grp, grpCtx := errgroup.WithContext(ctx)
 	grp.Go(func() error {
