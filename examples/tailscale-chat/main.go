@@ -10,9 +10,11 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"maps"
 	"net"
 	"os"
 	"os/signal"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -506,12 +508,7 @@ func (m *model) updateSuggestions(msg tea.Msg) {
 		switch msg.String() {
 		case "/":
 			if m.cmdLine.Value() == "/" {
-				m.cmdLine.SetSuggestions([]string{
-					"/help",
-					"/quiet",
-					"/exit",
-					"/quit",
-				})
+				m.cmdLine.SetSuggestions(commandSuggestions(commands))
 			}
 		}
 	}
@@ -524,7 +521,7 @@ func (m *model) CmdLineExecute() tea.Cmd {
 
 	defer func() {
 		m.cmdLine.Reset()
-		m.cmdLine.SetSuggestions([]string{})
+		m.cmdLine.SetSuggestions(nil)
 	}()
 
 	value := m.cmdLine.Value()
@@ -533,71 +530,13 @@ func (m *model) CmdLineExecute() tea.Cmd {
 		return m.SendChatCmd(value)
 	}
 
-	v := m.cmdLine.Value()
 	cmd, rest, _ := strings.Cut(m.cmdLine.Value(), " ")
 	if cmd == "" {
 		return nil
 	}
 
-	/* TODO
-	-> Available commands:
-	/away [REASON]             - Set away reason, or empty to unset.
-	/back                      - Clear away status.
-	/exit                      - Exit the chat.
-	/focus [USER ...]          - Only show messages from focused users, or $ to reset.
-	/ignore [USER]             - Hide messages from USER, /unignore USER to stop hiding.
-	/msg USER MESSAGE          - Send MESSAGE to USER.
-	/names                     - List users who are connected.
-	/nick NAME                 - Rename yourself.
-	/reply MESSAGE             - Reply with MESSAGE to the previous private message.
-	/theme [colors|...]        - Set your color theme.
-	/timestamp [time|datetime] - Prefix messages with a timestamp. You can also provide the UTC offset: /timestamp time +5h45m
-	/whois USER                - Information about USER.
-	*/
-	switch cmd {
-	case "/help":
-		m.cmdLine.Placeholder = ""
-		m.chatRing.Push(chatMsg{
-			cliAt: m.time,
-			who:   helpNick,
-			msg: strings.TrimLeftFunc(`
-Type out a message and press <enter> or use a command
-
--> Available commands:
-/quiet                     - Toggle system announcements.
-/exit                      - Exit the chat (aliases: /quit, /q) Ctrl+c will also quit
-
--> For input key mappings see:
-  - https://github.com/charmbracelet/bubbles/blob/v0.21.0/textinput/textinput.go#L68
-`, unicode.IsSpace),
-		})
-
-	// TODO: make this a whisper
-	case "/m", "/msg":
-		if rest != "" {
-			return m.SendChatCmd(rest)
-		}
-
-	case "/quiet":
-		m.quiet = !m.quiet
-		m.chatRing.Push(chatMsg{
-			cliAt: m.time,
-			who:   infoNick,
-			msg:   fmt.Sprintf("Quiet mode toggled %s", formatToggle(m.quiet)),
-		})
-
-	case "/debug_perf":
-		i, err := strconv.Atoi(rest)
-		if err != nil {
-			return m.SendChatCmd(fmt.Sprintf("%s => %v", v, err))
-		}
-
-		return m.SendCountCmd(i)
-
-	case "/exit", "/quit", "/q":
-		return tea.Quit
-
-	default:
+	if c, ok := commands[cmd]; ok {
+		return c.fn(m, rest)
 	}
 
 	return nil
@@ -667,4 +606,81 @@ func formatToggle(b bool) string {
 	}
 
 	return "OFF"
+}
+
+type commandFn func(*model, string) tea.Cmd
+
+type command struct {
+	fn commandFn
+}
+
+func mkCommand(f commandFn) command {
+	return command{f}
+}
+
+/*
+	TODO
+
+-> Available commands:
+/away [REASON]             - Set away reason, or empty to unset.
+/back                      - Clear away status.
+/exit                      - Exit the chat.
+/focus [USER ...]          - Only show messages from focused users, or $ to reset.
+/ignore [USER]             - Hide messages from USER, /unignore USER to stop hiding.
+/msg USER MESSAGE          - Send MESSAGE to USER.
+/names                     - List users who are connected.
+/nick NAME                 - Rename yourself.
+/reply MESSAGE             - Reply with MESSAGE to the previous private message.
+/theme [colors|...]        - Set your color theme.
+/timestamp [time|datetime] - Prefix messages with a timestamp. You can also provide the UTC offset: /timestamp time +5h45m
+/whois USER                - Information about USER.
+*/
+var commands = map[string]command{
+	"/help": mkCommand(func(m *model, argstr string) tea.Cmd {
+		m.cmdLine.Placeholder = ""
+		m.chatRing.Push(chatMsg{
+			cliAt: m.time,
+			who:   helpNick,
+			msg: strings.TrimLeftFunc(`
+Type out a message and press <enter> or use a command
+
+-> Available commands:
+/quiet                     - Toggle system announcements.
+/exit                      - Exit the chat (aliases: /quit, /q) Ctrl+c will also quit
+
+-> For input key mappings see:
+  - https://github.com/charmbracelet/bubbles/blob/v0.21.0/textinput/textinput.go#L68
+`, unicode.IsSpace),
+		})
+		return nil
+	}),
+
+	"/quiet": mkCommand(func(m *model, s string) tea.Cmd {
+		m.quiet = !m.quiet
+		m.chatRing.Push(chatMsg{
+			cliAt: m.time,
+			who:   infoNick,
+			msg:   fmt.Sprintf("Quiet mode toggled %s", formatToggle(m.quiet)),
+		})
+		return nil
+	}),
+
+	"/debug_perf": mkCommand(func(m *model, s string) tea.Cmd {
+		i, err := strconv.Atoi(s)
+		if err != nil {
+			return m.SendChatCmd(fmt.Sprintf("%s => %v", m.cmdLine.Value(), err))
+		}
+		return m.SendCountCmd(i)
+	}),
+
+	"/exit": mkCommand(func(m *model, argstr string) tea.Cmd {
+		return tea.Quit
+	}),
+	"/quit": mkCommand(func(m *model, argstr string) tea.Cmd {
+		return tea.Quit
+	}),
+}
+
+func commandSuggestions(cmds map[string]command) []string {
+	return slices.Sorted(maps.Keys(cmds))
 }
