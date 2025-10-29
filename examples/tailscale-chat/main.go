@@ -1,9 +1,9 @@
 package main
 
-// An example Bubble Tea server. This will put ssh session into alt screen and
-// continually print up to date terminal information. It uses tailscale for
-// authentication enabling both an HTTP webapp serviced by gotty and an SSH app
-// serviced by wish to use the same authentication system.
+// An example Bubble Tea chat server.
+// It uses tailscale for authentication enabling both an HTTP webapp serviced
+// by gotty and an SSH app serviced by wish to use the same authentication
+// system.
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 	"flag"
 	"fmt"
 	"net"
+	"os"
 	"os/signal"
 	"strconv"
 	"strings"
@@ -56,6 +57,13 @@ var (
 	StyleSystemMsg = StyleSystem
 )
 
+func init() {
+	switch os.Getenv("LIPGLOSS_LOG_FORMAT") {
+	case "json":
+		log.SetFormatter(log.JSONFormatter)
+	}
+}
+
 func main() {
 	flag.IntVar(&sshPort, "ssh-port", 23234, "port for ssh listener")
 	flag.IntVar(&httpPort, "http-port", 28080, "port for http listener")
@@ -100,8 +108,7 @@ func main() {
 	}
 	log.Info("Starting SSH server", "addr", net.JoinHostPort(tsIPv4.String(), fmt.Sprint(sshPort)))
 
-	// TODO: print out complete http(s):// string
-	log.Info("Starting HTTP server", "addr", net.JoinHostPort(tsIPv4.String(), fmt.Sprint(httpPort)))
+	log.Infof("Starting HTTP server http://%s:%d", tsIPv4.String(), httpPort)
 
 	err = errors.Join(
 		webwish.RunSSH(grpCtx, grp, cancel, ts.Ssh, s),
