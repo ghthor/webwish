@@ -17,6 +17,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -45,6 +46,8 @@ var (
 
 const (
 	systemNick = "system"
+	helpNick   = "help"
+	infoNick   = "info"
 )
 
 var (
@@ -258,6 +261,8 @@ type model struct {
 
 	chatRing *unsafering.RingBuffer[chatMsg]
 
+	quiet bool
+
 	err error
 }
 
@@ -284,6 +289,9 @@ func (m *model) At(row, cell int) string {
 	msg := m.AtRaw(row)
 	switch cell {
 	case COL_TS:
+		if msg.simAt.IsZero() {
+			return ""
+		}
 		return msg.simAt.Format(time.TimeOnly)
 	case COL_WHO:
 		id, _, _ := strings.Cut(msg.who, "@")
@@ -325,13 +333,16 @@ func (m *model) Init() tea.Cmd {
 	if m.cmds == nil {
 		m.cmds = make([]tea.Cmd, 0, 1)
 	}
+
+	// TODO: dynamic suggestions
 	m.cmdLine = textinput.New()
 	m.cmdLine.Prompt = "> "
-	m.cmdLine.Placeholder = "/ to open command mode"
+	m.cmdLine.Placeholder = "/help"
 	m.cmdLine.CharLimit = 0
+	m.cmdLine.ShowSuggestions = true
 
 	m.table = m.table.
-		Data(m).Headers().
+		Headers().Data(m).
 		Border(lipgloss.Border{}).
 		Wrap(true).
 		StyleFunc(func(row, col int) lipgloss.Style {
@@ -339,13 +350,15 @@ func (m *model) Init() tea.Cmd {
 
 			switch col {
 			case COL_WHO:
-				if msg.who == systemNick {
+				switch msg.who {
+				case systemNick, infoNick, helpNick:
 					return StyleSystemWho
 				}
 
 				return AlignRight
 			case COL_MSG:
-				if msg.who == systemNick {
+				switch msg.who {
+				case systemNick, infoNick, helpNick:
 					return StyleSystemMsg
 				}
 			default:
@@ -356,7 +369,7 @@ func (m *model) Init() tea.Cmd {
 
 	m.view = viewport.New(m.width, m.ChatViewHeight())
 
-	return nil
+	return tea.Batch(m.cmdLine.Focus())
 }
 
 func (m *infoModel) Init() tea.Cmd {
@@ -387,10 +400,8 @@ func (m *model) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "q", "ctrl+c":
+		case "ctrl+c":
 			return m, tea.Quit
-		case "/":
-			cmds = append(cmds, m.cmdLine.Focus())
 		case "enter":
 			cmds = append(cmds, m.CmdLineExecute())
 		}
@@ -402,7 +413,10 @@ func (m *model) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 				m.infoModel, cmd = m.UpdateInfo(msg)
 				cmds = append(cmds, cmd)
 			case chatMsg:
-				m.chatRing.Push(msg)
+				if m.quiet && msg.who == systemNick {
+				} else {
+					m.chatRing.Push(msg)
+				}
 
 			case mpty.ClientConnectMsg:
 			case mpty.ClientDisconnectMsg:
@@ -420,6 +434,7 @@ func (m *model) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 
 	m.cmdLine, cmd = m.cmdLine.Update(msg)
 	cmds = append(cmds, cmd)
+	m.updateSuggestions(msg)
 
 	return m, tea.Batch(cmds...)
 }
@@ -485,6 +500,23 @@ func (m *model) ViewportResize() {
 	m.view.Width = m.infoModel.width
 }
 
+func (m *model) updateSuggestions(msg tea.Msg) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "/":
+			if m.cmdLine.Value() == "/" {
+				m.cmdLine.SetSuggestions([]string{
+					"/help",
+					"/quiet",
+					"/exit",
+					"/quit",
+				})
+			}
+		}
+	}
+}
+
 func (m *model) CmdLineExecute() tea.Cmd {
 	if !m.cmdLine.Focused() {
 		return nil
@@ -492,8 +524,14 @@ func (m *model) CmdLineExecute() tea.Cmd {
 
 	defer func() {
 		m.cmdLine.Reset()
-		m.cmdLine.Blur()
+		m.cmdLine.SetSuggestions([]string{})
 	}()
+
+	value := m.cmdLine.Value()
+
+	if !strings.HasPrefix(value, "/") {
+		return m.SendChatCmd(value)
+	}
 
 	v := m.cmdLine.Value()
 	cmd, rest, _ := strings.Cut(m.cmdLine.Value(), " ")
@@ -501,19 +539,63 @@ func (m *model) CmdLineExecute() tea.Cmd {
 		return nil
 	}
 
+	/* TODO
+	-> Available commands:
+	/away [REASON]             - Set away reason, or empty to unset.
+	/back                      - Clear away status.
+	/exit                      - Exit the chat.
+	/focus [USER ...]          - Only show messages from focused users, or $ to reset.
+	/ignore [USER]             - Hide messages from USER, /unignore USER to stop hiding.
+	/msg USER MESSAGE          - Send MESSAGE to USER.
+	/names                     - List users who are connected.
+	/nick NAME                 - Rename yourself.
+	/reply MESSAGE             - Reply with MESSAGE to the previous private message.
+	/theme [colors|...]        - Set your color theme.
+	/timestamp [time|datetime] - Prefix messages with a timestamp. You can also provide the UTC offset: /timestamp time +5h45m
+	/whois USER                - Information about USER.
+	*/
 	switch cmd {
-	case "/m":
+	case "/help":
+		m.cmdLine.Placeholder = ""
+		m.chatRing.Push(chatMsg{
+			cliAt: m.time,
+			who:   helpNick,
+			msg: strings.TrimLeftFunc(`
+Type out a message and press <enter> or use a command
+
+-> Available commands:
+/quiet                     - Toggle system announcements.
+/exit                      - Exit the chat (aliases: /quit, /q) Ctrl+c will also quit
+
+-> For input key mappings see:
+  - https://github.com/charmbracelet/bubbles/blob/v0.21.0/textinput/textinput.go#L68
+`, unicode.IsSpace),
+		})
+
+	// TODO: make this a whisper
+	case "/m", "/msg":
 		if rest != "" {
 			return m.SendChatCmd(rest)
 		}
 
-	case "/count":
+	case "/quiet":
+		m.quiet = !m.quiet
+		m.chatRing.Push(chatMsg{
+			cliAt: m.time,
+			who:   infoNick,
+			msg:   fmt.Sprintf("Quiet mode toggled %s", formatToggle(m.quiet)),
+		})
+
+	case "/debug_perf":
 		i, err := strconv.Atoi(rest)
 		if err != nil {
 			return m.SendChatCmd(fmt.Sprintf("%s => %v", v, err))
 		}
 
 		return m.SendCountCmd(i)
+
+	case "/exit", "/quit", "/q":
+		return tea.Quit
 
 	default:
 	}
@@ -577,4 +659,12 @@ func sendMsg(ctx context.Context, send mpty.Input, msg tea.Msg) {
 	case <-ctx.Done():
 	case send <- msg:
 	}
+}
+
+func formatToggle(b bool) string {
+	if b {
+		return "ON"
+	}
+
+	return "OFF"
 }
