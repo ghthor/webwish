@@ -29,9 +29,13 @@ type Model struct {
 	render bool
 }
 
+func (m Model) Height() int {
+	return m.board.Height
+}
+
 var _ tea.Model = &Model{}
 
-const DefaultTick = time.Millisecond * 400
+const DefaultTick = time.Millisecond * 800
 
 type TickMsg time.Time
 
@@ -72,6 +76,15 @@ const (
 	HardDownMsg  Input = " "
 	SoftDownMsg  Input = "enter"
 )
+
+var InputRune = map[Input]rune{
+	InputNone:    ' ',
+	RotateCCWMsg: '↶',
+	RotateCWMsg:  '↷',
+	LeftMsg:      '←',
+	RightMsg:     '→',
+	HardDownMsg:  '⤓',
+}
 
 func (m *Model) UpdateTetris(msg tea.Msg) (*Model, tea.Cmd) {
 	switch msg := msg.(type) {

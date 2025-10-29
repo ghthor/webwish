@@ -254,6 +254,7 @@ type chatServer struct {
 	tetris         *tetris.Model
 	tetrisPlayers  map[mpty.ClientId]struct{}
 	tetrisInputs   map[mpty.ClientId]tetris.Input
+	tetrisInputTs  map[mpty.ClientId]int64
 	tetrisInputSum map[tetris.Input]int
 }
 
@@ -267,6 +268,8 @@ func (m *chatServer) Init() tea.Cmd {
 	if m.tetrisPlayers == nil {
 		m.tetrisPlayers = make(map[mpty.ClientId]struct{}, 10)
 		m.tetrisInputs = make(map[mpty.ClientId]tetris.Input, 10)
+		m.tetrisInputTs = make(map[mpty.ClientId]int64, 10)
+		m.tetrisInputSum = make(map[tetris.Input]int)
 	}
 	return tea.Batch(func() tea.Msg { return time.Now() })
 }
@@ -367,6 +370,8 @@ func (m *chatServer) UpdateTetris(msg tea.Msg) tea.Cmd {
 
 	case mpty.ClientDisconnectMsg:
 		delete(m.tetrisPlayers, mpty.ClientId(msg))
+		delete(m.tetrisInputs, mpty.ClientId(msg))
+		delete(m.tetrisInputTs, mpty.ClientId(msg))
 
 		if len(m.tetrisPlayers) == 0 {
 			m.broadcaster.Write(tetrisView(nil))
@@ -400,15 +405,19 @@ func (m *chatServer) UpdateTetris(msg tea.Msg) tea.Cmd {
 }
 
 func (m *chatServer) tetrisInput(msg tetrisInput) tetris.Input {
+	clear(m.tetrisInputSum)
 	m.tetrisInputs[msg.Id] = msg.Cmd
+	m.tetrisInputTs[msg.Id] = time.Now().UnixNano()
 
 	half := len(m.tetrisInputs) / 2
+	// half := len(m.tetrisPlayers)
 
 	for _, input := range m.tetrisInputs {
 		s := m.tetrisInputSum[input]
 		s++
-		if s > half {
+		if s >= half {
 			clear(m.tetrisInputs)
+			clear(m.tetrisInputTs)
 			return input
 		}
 		m.tetrisInputSum[input] = s
@@ -421,8 +430,42 @@ func (m *chatServer) tetrisInput(msg tetrisInput) tetris.Input {
 func (m *chatServer) tetrisView() tetrisView {
 	// TODO: players list
 	// TODO: inputs list
+	inputs := ""
+	inputs = m.tetrisInputView()
 	v := m.tetris.View()
+	v = lipgloss.JoinHorizontal(lipgloss.Top, inputs, v)
 	return tetrisView(&v)
+}
+
+func (m *chatServer) tetrisInputView() string {
+	type pair struct {
+		mpty.ClientId
+		ts int64
+	}
+	ins := make([]pair, 0, len(m.tetrisInputTs))
+	for k, v := range m.tetrisInputTs {
+		ins = append(ins, pair{k, v})
+	}
+	slices.SortStableFunc(ins, func(a, b pair) int {
+		switch {
+		case a.ts < b.ts:
+			return -1
+		case a.ts > b.ts:
+			return 1
+		default:
+			return 0
+		}
+	})
+
+	maxH := m.tetris.Height()
+	var b strings.Builder
+	for i, pair := range ins {
+		if i >= maxH {
+			break
+		}
+		fmt.Fprintln(&b, string(tetris.InputRune[m.tetrisInputs[pair.ClientId]]))
+	}
+	return b.String()
 }
 
 func (m *chatServer) View() string {
