@@ -11,7 +11,7 @@ require (
 	github.com/charmbracelet/ssh v0.0.0-20250128164007-98fd5ae11894
 	github.com/charmbracelet/wish v1.4.7
 	github.com/creack/pty v1.1.23
-	github.com/ghthor/gotty/v2 v2.3.5-0.20251026181702-b5d904cb14da
+	github.com/ghthor/gotty/v2 v2.3.5-0.20251029005134-cd3de2cfa4f6
 	github.com/golang-cz/ringbuf v0.0.5
 	github.com/gorilla/websocket v1.5.1
 	github.com/muesli/termenv v0.16.0
