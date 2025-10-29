@@ -330,7 +330,8 @@ type model struct {
 
 	chatView *unsafering.RingBuffer[chatMsg]
 
-	quiet bool
+	quiet         bool
+	showTimestamp bool
 
 	err error
 }
@@ -355,6 +356,10 @@ const (
 )
 
 func (m *model) At(row, cell int) string {
+	if !m.showTimestamp {
+		cell++
+	}
+
 	msg := m.AtRaw(row)
 	switch cell {
 	case COL_TS:
@@ -375,7 +380,13 @@ func (m *model) At(row, cell int) string {
 func (m *model) Rows() int {
 	return m.chatView.Len()
 }
-func (m *model) Columns() int { return 3 }
+func (m *model) Columns() int {
+	if m.showTimestamp {
+		return 3
+	} else {
+		return 2
+	}
+}
 
 func (m *model) SetTableOffset() {
 	m.table.Offset(max(0, m.chatView.Len()-m.ChatViewHeight()-1))
@@ -415,6 +426,10 @@ func (m *model) Init() tea.Cmd {
 		Wrap(true).
 		StyleFunc(func(row, col int) lipgloss.Style {
 			msg := m.AtRaw(row)
+
+			if !m.showTimestamp {
+				col++
+			}
 
 			switch col {
 			case COL_WHO:
@@ -712,7 +727,6 @@ func mkCommand(f commandFn) command {
 /nick NAME                 - Rename yourself.
 /reply MESSAGE             - Reply with MESSAGE to the previous private message.
 /theme [colors|...]        - Set your color theme.
-/timestamp [time|datetime] - Prefix messages with a timestamp. You can also provide the UTC offset: /timestamp time +5h45m
 /whois USER                - Information about USER.
 */
 var commands = map[string]command{
@@ -727,6 +741,7 @@ Type out a message and press <enter> or use a command
 -> Available commands:
 /names                     - List users who are connected.
 /quiet                     - Toggle system announcements.
+/timestamp                 - Toggle chat timestamps
 /exit                      - Exit the chat (aliases: /quit, /q) Ctrl+c will also quit
 
 -> For input key mappings see:
@@ -766,6 +781,17 @@ Type out a message and press <enter> or use a command
 			return m.SendChatCmd(fmt.Sprintf("%s => %v", m.cmdLine.Value(), err))
 		}
 		return m.SendCountCmd(i)
+	}),
+
+	// TODO: /timestamp [time|datetime] - Prefix messages with a timestamp. You can also provide the UTC offset: /timestamp time +5h45m
+	"/timestamp": mkCommand(func(m *model, _, _ string) tea.Cmd {
+		m.showTimestamp = !m.showTimestamp
+		m.chatView.Push(chatMsg{
+			cliAt: m.time,
+			who:   infoNick,
+			msg:   fmt.Sprintf("Timestamp is toggled %s", formatToggle(m.showTimestamp)),
+		})
+		return nil
 	}),
 
 	"/exit": mkCommand(func(m *model, cmd, _ string) tea.Cmd {
