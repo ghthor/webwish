@@ -29,11 +29,14 @@ import (
 	"github.com/charmbracelet/wish"
 	"github.com/charmbracelet/wish/logging"
 	"github.com/ghthor/webwish"
+	"github.com/ghthor/webwish/bubbles/tetris"
 	"github.com/ghthor/webwish/mpty"
+	"github.com/ghthor/webwish/teamodel"
 	"github.com/ghthor/webwish/tshelper"
 	"github.com/ghthor/webwish/tstea"
 	"github.com/ghthor/webwish/unsafering"
 	"github.com/golang-cz/ringbuf"
+	overlay "github.com/rmhubbert/bubbletea-overlay"
 	"golang.org/x/sync/errgroup"
 	"tailscale.com/client/tailscale/apitype"
 )
@@ -229,22 +232,53 @@ type namesMsg struct {
 	names []string
 }
 
+type (
+	tetrisAddPlayerMsg mpty.ClientId
+	tetrisRmPlayerMsg  mpty.ClientId
+
+	tetrisView  *string
+	tetrisInput struct {
+		Id  mpty.ClientId
+		Cmd tetris.Input
+	}
+)
+
 type chatServer struct {
+	cmds        []tea.Cmd
 	broadcaster *ringbuf.RingBuffer[tea.Msg]
 
 	tick time.Time
 
 	names map[string]map[string]time.Time
+
+	tetris         *tetris.Model
+	tetrisPlayers  map[mpty.ClientId]struct{}
+	tetrisInputs   map[mpty.ClientId]tetris.Input
+	tetrisInputSum map[tetris.Input]int
 }
 
 func (m *chatServer) Init() tea.Cmd {
+	if m.cmds == nil {
+		m.cmds = make([]tea.Cmd, 0, 2)
+	}
 	if m.names == nil {
 		m.names = make(map[string]map[string]time.Time, 10)
+	}
+	if m.tetrisPlayers == nil {
+		m.tetrisPlayers = make(map[mpty.ClientId]struct{}, 10)
+		m.tetrisInputs = make(map[mpty.ClientId]tetris.Input, 10)
 	}
 	return tea.Batch(func() tea.Msg { return time.Now() })
 }
 
 func (m *chatServer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	m.cmds = m.cmds[:0]
+	m.UpdateChat(msg)
+	m.cmds = append(m.cmds, m.UpdateTetris(msg))
+	return m, tea.Batch(m.cmds...)
+}
+
+func (m *chatServer) UpdateChat(msg tea.Msg) {
 	switch msg := msg.(type) {
 	case *ringbuf.RingBuffer[tea.Msg]:
 		m.broadcaster = msg
@@ -303,8 +337,92 @@ func (m *chatServer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case time.Time:
 		m.tick = msg
 	}
+}
 
-	return m, nil
+func (m *chatServer) UpdateTetris(msg tea.Msg) tea.Cmd {
+	tetrisMsg := msg
+
+	switch msg := msg.(type) {
+	case tetrisAddPlayerMsg:
+		m.tetrisPlayers[mpty.ClientId(msg)] = struct{}{}
+
+		var cmd tea.Cmd
+		if m.tetris == nil {
+			m.tetris = tetris.New()
+			cmd = m.tetris.Init()
+		}
+		m.broadcaster.Write(m.tetrisView())
+		return cmd
+
+	case tetrisRmPlayerMsg:
+		delete(m.tetrisPlayers, mpty.ClientId(msg))
+
+		if len(m.tetrisPlayers) == 0 {
+			m.broadcaster.Write(tetrisView(nil))
+			m.tetris = nil
+		} else {
+			m.broadcaster.Write(m.tetrisView())
+		}
+		return nil
+
+	case mpty.ClientDisconnectMsg:
+		delete(m.tetrisPlayers, mpty.ClientId(msg))
+
+		if len(m.tetrisPlayers) == 0 {
+			m.broadcaster.Write(tetrisView(nil))
+			m.tetris = nil
+		} else {
+			m.broadcaster.Write(m.tetrisView())
+		}
+		return nil
+
+	case tetrisInput:
+		i := m.tetrisInput(msg)
+		if i == tetris.InputNone {
+			return nil
+		}
+		tetrisMsg = i
+	}
+
+	if m.tetris != nil {
+		var (
+			cmd      tea.Cmd
+			modified bool
+		)
+		m.tetris, cmd, modified = m.tetris.UpdateTetrisShouldRender(tetrisMsg)
+		if modified {
+			m.broadcaster.Write(m.tetrisView())
+		}
+		return cmd
+	}
+
+	return nil
+}
+
+func (m *chatServer) tetrisInput(msg tetrisInput) tetris.Input {
+	m.tetrisInputs[msg.Id] = msg.Cmd
+
+	half := len(m.tetrisInputs) / 2
+
+	for _, input := range m.tetrisInputs {
+		s := m.tetrisInputSum[input]
+		s++
+		if s > half {
+			clear(m.tetrisInputs)
+			return input
+		}
+		m.tetrisInputSum[input] = s
+		continue
+	}
+
+	return tetris.InputNone
+}
+
+func (m *chatServer) tetrisView() tetrisView {
+	// TODO: players list
+	// TODO: inputs list
+	v := m.tetris.View()
+	return tetrisView(&v)
 }
 
 func (m *chatServer) View() string {
@@ -327,6 +445,11 @@ type model struct {
 	view    viewport.Model
 
 	chatView *unsafering.RingBuffer[chatMsg]
+
+	tetrisView    tetrisView
+	tetrisEnabled bool
+
+	overlay *overlay.Model
 
 	quiet         bool
 	showTimestamp bool
@@ -450,6 +573,8 @@ func (m *model) Init() tea.Cmd {
 
 	m.view = viewport.New(m.width, m.ChatViewHeight())
 
+	m.overlay = overlay.New(nil, nil, overlay.Right, overlay.Center, -10, 0)
+
 	return tea.Batch(m.cmdLine.Focus())
 }
 
@@ -485,7 +610,17 @@ func (m *model) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 			return m, tea.Quit
 		case "enter":
 			cmds = append(cmds, m.CmdLineExecute())
+			if m.tetrisEnabled && m.cmdLine.Focused() {
+				m.cmdLine.Blur()
+			}
+		case "/":
+			if m.tetrisEnabled && !m.cmdLine.Focused() {
+				cmds = append(cmds, m.cmdLine.Focus())
+			}
 		}
+
+	case tetrisView:
+		m.tetrisView = msg
 
 	case []tea.Msg:
 		for _, msg := range msg {
@@ -505,6 +640,8 @@ func (m *model) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 						msg: fmt.Sprintf("-> %d connected: %s", len(msg.names), strings.Join(msg.names, ", ")),
 					})
 				}
+			case tetrisView:
+				m.tetrisView = msg
 
 			case mpty.ClientConnectMsg:
 			case mpty.ClientDisconnectMsg:
@@ -524,7 +661,26 @@ func (m *model) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 	cmds = append(cmds, cmd)
 	m.updateSuggestions(msg)
 
+	cmds = append(cmds, m.UpdateTetris(msg))
+
 	return m, tea.Batch(cmds...)
+}
+
+func (m *model) UpdateTetris(msg tea.Msg) tea.Cmd {
+	if !m.tetrisEnabled {
+		return nil
+	}
+
+	if key, ok := msg.(tea.KeyMsg); ok && !m.cmdLine.Focused() {
+		return sendMsgCmd(m.ctx, m.Send, tetrisInput{
+			Id: m.Id(),
+			// TODO: enable key remapping??
+			Cmd: tetris.Input(key.String()),
+		})
+	}
+
+	return nil
+
 }
 
 func (m *infoModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -551,11 +707,25 @@ func (m *model) View() string {
 
 	fmt.Fprint(b, m.infoModel.View())
 
+	// TODO: guard with render bool
 	t := m.table.Render()
 	t = lipgloss.PlaceVertical(m.ChatViewHeight(), lipgloss.Bottom, t)
 	m.view.SetContent(t)
 	m.view.GotoBottom()
-	fmt.Fprintln(b, m.view.View())
+	v := m.view.View()
+
+	if m.tetrisView != nil {
+		v = lipgloss.Place(
+			m.width, m.ChatViewHeight(),
+			lipgloss.Left, lipgloss.Bottom,
+			v,
+		)
+		m.overlay.Foreground = teamodel.String(*m.tetrisView)
+		m.overlay.Background = teamodel.String(v)
+		fmt.Fprintln(b, m.overlay.View())
+	} else {
+		fmt.Fprintln(b, v)
+	}
 
 	fmt.Fprint(b, m.cmdLine.View())
 
@@ -691,5 +861,12 @@ func sendMsg(ctx context.Context, send mpty.Input, msg tea.Msg) {
 	select {
 	case <-ctx.Done():
 	case send <- msg:
+	}
+}
+
+func sendMsgCmd(ctx context.Context, send mpty.Input, msg tea.Msg) tea.Cmd {
+	return func() tea.Msg {
+		sendMsg(ctx, send, msg)
+		return nil
 	}
 }

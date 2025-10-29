@@ -46,23 +46,44 @@ func mkCommand(f commandFn) command {
 */
 var commands = map[string]command{
 	"/help": mkCommand(func(m *model, _, _ string) tea.Cmd {
-		m.cmdLine.Placeholder = ""
-		m.chatView.Push(chatMsg{
-			cliAt: m.time,
-			who:   helpNick,
-			msg: strings.TrimLeftFunc(`
+		if !m.tetrisEnabled {
+			m.cmdLine.Placeholder = ""
+			m.chatView.Push(chatMsg{
+				cliAt: m.time,
+				who:   helpNick,
+				msg: strings.TrimLeftFunc(`
 Type out a message and press <enter> or use a command
 
 -> Available commands:
 /names                     - List users who are connected.
 /quiet                     - Toggle system announcements.
 /timestamp                 - Toggle chat timestamps
+/tetris                    - Start/Join chat plays tetris
 /exit                      - Exit the chat (aliases: /quit, /q) Ctrl+c will also quit
 
 -> For input key mappings see:
   - https://github.com/charmbracelet/bubbles/blob/v0.21.0/textinput/textinput.go#L68
 `, unicode.IsSpace),
-		})
+			})
+		} else if m.tetrisEnabled {
+			m.chatView.Push(chatMsg{
+				cliAt: m.time,
+				who:   helpNick,
+				msg: strings.TrimLeftFunc(`
+Input is queued until >50% of players have chosen/voted for the same input
+
+    [ d ]  [ f ]       [ j ]  [ k ]
+   ←move    move→      ↶ CCW   CW ↷
+
+             [__ space __]
+             ⤓ hard drop ⤓
+
+-> Available commands:
+/exit                      - Exit tetris
+
+`, unicode.IsSpace),
+			})
+		}
 		return nil
 	}),
 
@@ -108,14 +129,47 @@ Type out a message and press <enter> or use a command
 		})
 		return nil
 	}),
+	"/tetris": mkCommand(func(m *model, _, args string) tea.Cmd {
+		switch args {
+		case "":
+			if m.tetrisEnabled {
+				return nil
+			}
 
-	"/exit": mkCommand(func(m *model, cmd, _ string) tea.Cmd {
-		return tea.Quit
+			m.tetrisEnabled = true
+			m.cmdLine.Prompt = "tetris> "
+			m.cmdLine.Placeholder = "/ to open command line"
+			m.cmdLine.Blur()
+			return sendMsgCmd(m.ctx, m.Send, tetrisAddPlayerMsg(m.Id()))
+		case "stop":
+			return m.exitTetrisCmd()
+		default:
+		}
+		return nil
 	}),
-	"/quit": mkCommand(func(m *model, cmd, _ string) tea.Cmd {
-		return tea.Quit
-	}),
+
+	"/exit": exitCommand,
+	"/quit": exitCommand,
 }
+
+func (m *model) exitTetrisCmd() tea.Cmd {
+	m.tetrisEnabled = false
+	m.cmdLine.Prompt = "> "
+	m.cmdLine.Placeholder = ""
+	if !m.cmdLine.Focused() {
+		return m.cmdLine.Focus()
+	}
+	return sendMsgCmd(m.ctx, m.Send, tetrisRmPlayerMsg(m.Id()))
+}
+
+var exitCommand = mkCommand(func(m *model, cmd, _ string) tea.Cmd {
+	switch {
+	case m.tetrisView != nil:
+		return m.exitTetrisCmd()
+	default:
+		return tea.Quit
+	}
+})
 
 func commandSuggestions(cmds map[string]command) []string {
 	return slices.Sorted(maps.Keys(cmds))
