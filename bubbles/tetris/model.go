@@ -229,8 +229,9 @@ type Piece struct {
 type Board struct {
 	Width, Height int
 
-	lines [][]uint8
-	Cells [][]uint8
+	cleared [][]uint8
+	lines   [][]uint8
+	Cells   [][]uint8
 
 	Colors map[uint8]lipgloss.Style
 }
@@ -247,9 +248,10 @@ func NewBoard(w, h int) *Board {
 	}
 	return &Board{
 		Width: w, Height: h,
-		lines:  make([][]uint8, h),
-		Cells:  cells,
-		Colors: colors,
+		cleared: make([][]uint8, 4),
+		lines:   make([][]uint8, h),
+		Cells:   cells,
+		Colors:  colors,
 	}
 }
 
@@ -310,6 +312,7 @@ func (b *Board) ClearLines() int {
 	b.lines, b.Cells = b.Cells, b.lines
 	b.Cells = b.Cells[:0]
 
+	b.cleared = b.cleared[:0]
 	cleared := 0
 
 	// iterate from bottom to top
@@ -323,10 +326,19 @@ func (b *Board) ClearLines() int {
 		}
 		if full {
 			cleared++
+			b.cleared = append(b.cleared, b.lines[y])
 		} else {
 			// keep this line
 			b.Cells = append(b.Cells, b.lines[y])
 		}
+	}
+
+	// Empty the cleared lines and reappend them to the top of the board
+	for y := range b.cleared {
+		for x := range b.cleared[y] {
+			b.cleared[y][x] = Empty
+		}
+		b.Cells = append(b.Cells, b.cleared[y])
 	}
 
 	// add new empty rows at top
