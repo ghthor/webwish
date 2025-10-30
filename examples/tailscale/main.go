@@ -72,7 +72,7 @@ func main() {
 		webwish.RunSSH(grpCtx, grp, cancel, ts.Ssh, s),
 		webwish.RunHTTP(grpCtx, grp, cancel, ts.Http, tstea.NewTeaTYFactory(
 			ctx, ts.Client, newHttpModel, newProg,
-		)),
+		), "webtty"),
 	)
 	if err != nil {
 		log.Fatal("failed to start webwish", "error", err)
@@ -94,7 +94,7 @@ func main() {
 	}
 }
 
-func newSshModel(ctx context.Context, pty ssh.Pty, sess tstea.Session, who *apitype.WhoIsResponse) mpty.ClientModel {
+func newSshModel(ctx context.Context, pty ssh.Pty, sess mpty.Session, who *apitype.WhoIsResponse) mpty.ClientModel {
 	return &model{
 		ctx:    ctx,
 		term:   pty.Term,
@@ -107,7 +107,7 @@ func newSshModel(ctx context.Context, pty ssh.Pty, sess tstea.Session, who *apit
 	}
 }
 
-func newHttpModel(ctx context.Context, sess tstea.Session, who *apitype.WhoIsResponse) mpty.ClientModel {
+func newHttpModel(ctx context.Context, sess mpty.Session, who *apitype.WhoIsResponse) mpty.ClientModel {
 	return &model{
 		ctx:    ctx,
 		term:   "xterm",
@@ -152,7 +152,7 @@ type model struct {
 	height int
 	time   time.Time
 
-	sess tstea.Session
+	sess mpty.Session
 	who  *apitype.WhoIsResponse
 }
 
@@ -205,4 +205,8 @@ func (m *model) View() string {
 	fmt.Fprintln(b, "\n[q]uit")
 
 	return b.String()
+}
+
+func (m *model) Err() error {
+	return nil
 }

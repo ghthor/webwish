@@ -143,19 +143,11 @@ func main() {
 }
 
 func newSshModel() tstea.NewSshModel {
-	return func(ctx context.Context, pty ssh.Pty, sess tstea.Session, who *apitype.WhoIsResponse) mpty.ClientModel {
+	return func(ctx context.Context, pty ssh.Pty, sess mpty.Session, who *apitype.WhoIsResponse) mpty.ClientModel {
 		return &model{
 			ctx: ctx,
 
-			infoModel: &infoModel{
-				term:   pty.Term,
-				width:  pty.Window.Width,
-				height: pty.Window.Height,
-				time:   time.Now(),
-
-				sess: sess,
-				who:  who,
-			},
+			ClientInfoModel: mpty.NewClientInfoModelFromSsh(pty, sess, who),
 
 			table:    table.New(),
 			chatView: unsafering.NewRingBuffer[chatMsg](300),
@@ -164,19 +156,11 @@ func newSshModel() tstea.NewSshModel {
 }
 
 func newHttpModel() tstea.NewHttpModel {
-	return func(ctx context.Context, sess tstea.Session, who *apitype.WhoIsResponse) mpty.ClientModel {
+	return func(ctx context.Context, sess mpty.Session, who *apitype.WhoIsResponse) mpty.ClientModel {
 		return &model{
 			ctx: ctx,
 
-			infoModel: &infoModel{
-				term:   "xterm",
-				width:  80,
-				height: 40,
-				time:   time.Now(),
-
-				sess: sess,
-				who:  who,
-			},
+			ClientInfoModel: mpty.NewClientInfoModelFromWebtty(sess, who),
 
 			table:    table.New(),
 			chatView: unsafering.NewRingBuffer[chatMsg](300),
@@ -473,6 +457,8 @@ func (m *chatServer) View() string {
 }
 
 type model struct {
+	*mpty.ClientInfoModel
+
 	b strings.Builder
 
 	Send mpty.Input
@@ -480,8 +466,6 @@ type model struct {
 	ctx context.Context
 
 	cmds []tea.Cmd
-
-	*infoModel
 
 	cmdLine textinput.Model
 	table   *table.Table
@@ -556,22 +540,6 @@ func (m *model) SetTableOffset() {
 	m.table.Offset(max(0, m.chatView.Len()-m.ChatViewHeight()-1))
 }
 
-type infoModel struct {
-	b strings.Builder
-
-	term   string
-	width  int
-	height int
-	time   time.Time
-
-	sess tstea.Session
-	who  *apitype.WhoIsResponse
-}
-
-func (m *infoModel) Id() mpty.ClientId {
-	return mpty.ClientId(m.who.UserProfile.LoginName + " " + m.sess.RemoteAddr().String())
-}
-
 func (m *model) Init() tea.Cmd {
 	if m.cmds == nil {
 		m.cmds = make([]tea.Cmd, 0, 1)
@@ -614,15 +582,11 @@ func (m *model) Init() tea.Cmd {
 			return None
 		})
 
-	m.view = viewport.New(m.width, m.ChatViewHeight())
+	m.view = viewport.New(m.Width, m.ChatViewHeight())
 
 	m.overlay = overlay.New(nil, nil, overlay.Right, overlay.Center, -10, 0)
 
 	return tea.Batch(m.cmdLine.Focus())
-}
-
-func (m *infoModel) Init() tea.Cmd {
-	return nil
 }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -635,7 +599,7 @@ func (m *model) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 		cmds = m.cmds[:0]
 	)
 
-	m.infoModel, cmd = m.UpdateInfo(msg)
+	m.ClientInfoModel, cmd = m.UpdateInfo(msg)
 	cmds = append(cmds, cmd)
 
 	switch msg := msg.(type) {
@@ -669,7 +633,7 @@ func (m *model) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 		for _, msg := range msg {
 			switch msg := msg.(type) {
 			case time.Time:
-				m.infoModel, cmd = m.UpdateInfo(msg)
+				m.ClientInfoModel, cmd = m.UpdateInfo(msg)
 				cmds = append(cmds, cmd)
 			case chatMsg:
 				if m.quiet && msg.who == systemNick {
@@ -691,7 +655,7 @@ func (m *model) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 
 			case error:
 				m.err = msg
-				log.Warn("client fatal", "error", msg, "who", m.who.UserProfile.LoginName, "sess", m.sess.RemoteAddr().String())
+				log.Warn("client fatal", "error", msg, "who", m.Who.UserProfile.LoginName, "sess", m.Sess.RemoteAddr().String())
 				return m, tea.Quit
 			default:
 				log.Warnf("unhandled broadcast message type: %T", msg)
@@ -726,29 +690,11 @@ func (m *model) UpdateTetris(msg tea.Msg) tea.Cmd {
 
 }
 
-func (m *infoModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	m, cmd := m.UpdateInfo(msg)
-	return m, cmd
-}
-
-func (m *infoModel) UpdateInfo(msg tea.Msg) (*infoModel, tea.Cmd) {
-	switch msg := msg.(type) {
-
-	case time.Time:
-		m.time = msg
-
-	case tea.WindowSizeMsg:
-		m.height = msg.Height
-		m.width = msg.Width
-	}
-	return m, nil
-}
-
 func (m *model) View() string {
 	b := &m.b
 	b.Reset()
 
-	fmt.Fprint(b, m.infoModel.View())
+	fmt.Fprint(b, m.ClientInfoModel.View())
 
 	// TODO: guard with render bool
 	t := m.table.Render()
@@ -759,7 +705,7 @@ func (m *model) View() string {
 
 	if m.tetrisView != nil {
 		v = lipgloss.Place(
-			m.width, m.ChatViewHeight(),
+			m.Width, m.ChatViewHeight(),
 			lipgloss.Left, lipgloss.Bottom,
 			v,
 		)
@@ -775,30 +721,14 @@ func (m *model) View() string {
 	return b.String()
 }
 
-func (m *infoModel) View() string {
-	b := &m.b
-	b.Reset()
-	if m.who != nil {
-		fmt.Fprintf(b, "  who: %s\n", m.who.UserProfile.LoginName)
-	}
-	if m.sess != nil {
-		fmt.Fprintf(b, "raddr: %s\n", m.sess.RemoteAddr().String())
-	}
-	fmt.Fprintf(b, " term: %s\n", m.term)
-	fmt.Fprintf(b, " size: (%d,%d)\n", m.width, m.height)
-	fmt.Fprintf(b, " time: %s\n", Bold.Render(m.time.Format(time.RFC1123)))
-
-	return b.String()
-}
-
-func (m *infoModel) ChatViewHeight() int {
+func (m *model) ChatViewHeight() int {
 	// win H - info H - cmdline H
-	return max(0, m.height-5-1)
+	return max(0, m.Height-5-1)
 }
 
 func (m *model) ViewportResize() {
 	m.view.Height = m.ChatViewHeight()
-	m.view.Width = m.infoModel.width
+	m.view.Width = m.ClientInfoModel.Width
 }
 
 func (m *model) updateSuggestions(msg tea.Msg) {
@@ -836,9 +766,9 @@ func (m *model) CmdLineExecute() tea.Cmd {
 
 	// TODO: maybe style these type of messages differently?
 	m.chatView.Push(chatMsg{
-		simAt: m.time,
-		who:   m.who.UserProfile.LoginName,
-		sess:  m.sess.RemoteAddr().String(),
+		simAt: m.Time,
+		who:   m.Who.UserProfile.LoginName,
+		sess:  m.Sess.RemoteAddr().String(),
 		msg:   value,
 	})
 
@@ -851,8 +781,8 @@ func (m *model) CmdLineExecute() tea.Cmd {
 
 func (m *model) SendChatCmd(msg string) tea.Cmd {
 	var (
-		who  = m.who.UserProfile.LoginName
-		sess = m.sess.RemoteAddr().String()
+		who  = m.Who.UserProfile.LoginName
+		sess = m.Sess.RemoteAddr().String()
 		now  = time.Now()
 		chat = chatMsg{
 			cliAt: now,
@@ -876,8 +806,8 @@ func (m *model) SendChatCmd(msg string) tea.Cmd {
 
 func (m *model) SendCountCmd(i int) tea.Cmd {
 	var (
-		who  = m.who.UserProfile.LoginName
-		sess = m.sess.RemoteAddr().String()
+		who  = m.Who.UserProfile.LoginName
+		sess = m.Sess.RemoteAddr().String()
 
 		send = m.Send
 	)

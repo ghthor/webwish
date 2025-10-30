@@ -49,7 +49,7 @@ var commands = map[string]command{
 		if !m.tetrisEnabled {
 			m.cmdLine.Placeholder = ""
 			m.chatView.Push(chatMsg{
-				cliAt: m.time,
+				cliAt: m.Time,
 				who:   helpNick,
 				msg: strings.TrimLeftFunc(`
 Type out a message and press <enter> or use a command
@@ -67,7 +67,7 @@ Type out a message and press <enter> or use a command
 			})
 		} else if m.tetrisEnabled {
 			m.chatView.Push(chatMsg{
-				cliAt: m.time,
+				cliAt: m.Time,
 				who:   helpNick,
 				msg: strings.TrimLeftFunc(`
 Input is queued until >50% of players have chosen/voted for the same input
@@ -104,7 +104,7 @@ Input is queued until >50% of players have chosen/voted for the same input
 	"/quiet": mkCommand(func(m *model, cmd, _ string) tea.Cmd {
 		m.quiet = !m.quiet
 		m.chatView.Push(chatMsg{
-			cliAt: m.time,
+			cliAt: m.Time,
 			who:   infoNick,
 			msg:   fmt.Sprintf("Quiet mode toggled %s", formatToggle(m.quiet)),
 		})
@@ -123,7 +123,7 @@ Input is queued until >50% of players have chosen/voted for the same input
 	"/timestamp": mkCommand(func(m *model, _, _ string) tea.Cmd {
 		m.showTimestamp = !m.showTimestamp
 		m.chatView.Push(chatMsg{
-			cliAt: m.time,
+			cliAt: m.Time,
 			who:   infoNick,
 			msg:   fmt.Sprintf("Timestamp is toggled %s", formatToggle(m.showTimestamp)),
 		})
