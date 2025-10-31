@@ -177,17 +177,6 @@ type namesMsg struct {
 	names []string
 }
 
-type (
-	tetrisAddPlayerMsg mpty.ClientId
-	tetrisRmPlayerMsg  mpty.ClientId
-
-	tetrisView  *string
-	tetrisInput struct {
-		Id  mpty.ClientId
-		Cmd tetris.Input
-	}
-)
-
 type chatServer struct {
 	cmds        []tea.Cmd
 	broadcaster *ringbuf.RingBuffer[tea.Msg]
@@ -196,11 +185,7 @@ type chatServer struct {
 
 	names map[string]map[string]time.Time
 
-	tetris         *tetris.Model
-	tetrisPlayers  map[mpty.ClientId]struct{}
-	tetrisInputs   map[mpty.ClientId]tetris.Input
-	tetrisInputTs  map[mpty.ClientId]int64
-	tetrisInputSum map[tetris.Input]int
+	tetris *tetris.MPModel
 }
 
 func (m *chatServer) Init() tea.Cmd {
@@ -210,13 +195,13 @@ func (m *chatServer) Init() tea.Cmd {
 	if m.names == nil {
 		m.names = make(map[string]map[string]time.Time, 10)
 	}
-	if m.tetrisPlayers == nil {
-		m.tetrisPlayers = make(map[mpty.ClientId]struct{}, 10)
-		m.tetrisInputs = make(map[mpty.ClientId]tetris.Input, 10)
-		m.tetrisInputTs = make(map[mpty.ClientId]int64, 10)
-		m.tetrisInputSum = make(map[tetris.Input]int)
+	if m.tetris == nil {
+		m.tetris = &tetris.MPModel{}
 	}
-	return tea.Batch(func() tea.Msg { return time.Now() })
+	return tea.Batch(
+		func() tea.Msg { return time.Now() },
+		m.tetris.Init(),
+	)
 }
 
 func (m *chatServer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -284,129 +269,8 @@ func (m *chatServer) UpdateChat(msg tea.Msg) {
 }
 
 func (m *chatServer) UpdateTetris(msg tea.Msg) tea.Cmd {
-	tetrisMsg := msg
-
-	switch msg := msg.(type) {
-	case tetrisAddPlayerMsg:
-		m.tetrisPlayers[mpty.ClientId(msg)] = struct{}{}
-
-		var cmd tea.Cmd
-		if m.tetris == nil {
-			m.tetris = tetris.New()
-			cmd = m.tetris.Init()
-		}
-		m.broadcaster.Write(m.tetrisView())
-		return cmd
-
-	case tetrisRmPlayerMsg:
-		delete(m.tetrisPlayers, mpty.ClientId(msg))
-
-		if len(m.tetrisPlayers) == 0 {
-			m.broadcaster.Write(tetrisView(nil))
-			m.tetris = nil
-		} else {
-			m.broadcaster.Write(m.tetrisView())
-		}
-		return nil
-
-	case mpty.ClientDisconnectMsg:
-		delete(m.tetrisPlayers, mpty.ClientId(msg))
-		delete(m.tetrisInputs, mpty.ClientId(msg))
-		delete(m.tetrisInputTs, mpty.ClientId(msg))
-
-		if len(m.tetrisPlayers) == 0 {
-			m.broadcaster.Write(tetrisView(nil))
-			m.tetris = nil
-		} else {
-			m.broadcaster.Write(m.tetrisView())
-		}
-		return nil
-
-	case tetrisInput:
-		i := m.tetrisInput(msg)
-		if i == tetris.InputNone {
-			return nil
-		}
-		tetrisMsg = i
-	}
-
-	if m.tetris != nil {
-		var (
-			cmd      tea.Cmd
-			modified bool
-		)
-		m.tetris, cmd, modified = m.tetris.UpdateTetrisShouldRender(tetrisMsg)
-		if modified {
-			m.broadcaster.Write(m.tetrisView())
-		}
-		return cmd
-	}
-
-	return nil
-}
-
-func (m *chatServer) tetrisInput(msg tetrisInput) tetris.Input {
-	clear(m.tetrisInputSum)
-	m.tetrisInputs[msg.Id] = msg.Cmd
-	m.tetrisInputTs[msg.Id] = time.Now().UnixNano()
-
-	half := len(m.tetrisInputs) / 2
-	// half := len(m.tetrisPlayers)
-
-	for _, input := range m.tetrisInputs {
-		s := m.tetrisInputSum[input]
-		s++
-		if s >= half {
-			clear(m.tetrisInputs)
-			clear(m.tetrisInputTs)
-			return input
-		}
-		m.tetrisInputSum[input] = s
-		continue
-	}
-
-	return tetris.InputNone
-}
-
-func (m *chatServer) tetrisView() tetrisView {
-	// TODO: players list
-	// TODO: inputs list
-	inputs := ""
-	inputs = m.tetrisInputView()
-	v := m.tetris.View()
-	v = lipgloss.JoinHorizontal(lipgloss.Top, inputs, v)
-	return tetrisView(&v)
-}
-
-func (m *chatServer) tetrisInputView() string {
-	type pair struct {
-		mpty.ClientId
-		ts int64
-	}
-	ins := make([]pair, 0, len(m.tetrisInputTs))
-	for k, v := range m.tetrisInputTs {
-		ins = append(ins, pair{k, v})
-	}
-	slices.SortStableFunc(ins, func(a, b pair) int {
-		switch {
-		case a.ts < b.ts:
-			return -1
-		case a.ts > b.ts:
-			return 1
-		default:
-			return 0
-		}
-	})
-
-	maxH := m.tetris.Height()
-	var b strings.Builder
-	for i, pair := range ins {
-		if i >= maxH {
-			break
-		}
-		fmt.Fprintln(&b, string(tetris.InputRune[m.tetrisInputs[pair.ClientId]]))
-	}
-	return b.String()
+	cmd := m.tetris.UpdateTetris(msg)
+	return cmd
 }
 
 func (m *chatServer) View() string {
@@ -430,8 +294,8 @@ type model struct {
 
 	chatView *unsafering.RingBuffer[chat.Msg]
 
-	tetrisView    tetrisView
-	tetrisEnabled bool
+	tetrisView      tetris.MPView
+	tetrisConnected bool
 
 	overlay *overlay.Model
 
@@ -574,16 +438,16 @@ func (m *model) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 			return m, tea.Quit
 		case "enter":
 			cmds = append(cmds, m.CmdLineExecute())
-			if m.tetrisEnabled && m.cmdLine.Focused() {
+			if m.tetrisConnected && m.cmdLine.Focused() {
 				m.cmdLine.Blur()
 			}
 		case "/":
-			if m.tetrisEnabled && !m.cmdLine.Focused() {
+			if m.tetrisConnected && !m.cmdLine.Focused() {
 				cmds = append(cmds, m.cmdLine.Focus())
 			}
 		}
 
-	case tetrisView:
+	case tetris.MPView:
 		m.tetrisView = msg
 
 	case []tea.Msg:
@@ -603,7 +467,7 @@ func (m *model) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 						fmt.Sprintf("-> %d connected: %s", len(msg.names), strings.Join(msg.names, ", ")),
 					))
 				}
-			case tetrisView:
+			case tetris.MPView:
 				m.tetrisView = msg
 
 			case mpty.ClientConnectMsg:
@@ -630,12 +494,12 @@ func (m *model) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 }
 
 func (m *model) UpdateTetris(msg tea.Msg) tea.Cmd {
-	if !m.tetrisEnabled {
+	if !m.tetrisConnected {
 		return nil
 	}
 
 	if key, ok := msg.(tea.KeyMsg); ok && !m.cmdLine.Focused() {
-		return sendMsgCmd(m.ctx, m.Send, tetrisInput{
+		return sendMsgCmd(m.ctx, m.Send, tetris.MPInput{
 			Id: m.Id(),
 			// TODO: enable key remapping??
 			Cmd: tetris.Input(key.String()),

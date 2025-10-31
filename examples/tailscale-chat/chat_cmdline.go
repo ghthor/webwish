@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/ghthor/webwish/bubbles/chat"
+	"github.com/ghthor/webwish/bubbles/tetris"
 )
 
 func formatToggle(b bool) string {
@@ -48,7 +49,7 @@ func mkCommand(f commandFn) command {
 */
 var commands = map[string]command{
 	"/help": mkCommand(func(m *model, _, _ string) tea.Cmd {
-		if !m.tetrisEnabled {
+		if !m.tetrisConnected {
 			m.cmdLine.Placeholder = ""
 			m.chatView.Push(chat.HelpMsg(m.Time, strings.TrimLeftFunc(`
 Type out a message and press <enter> or use a command
@@ -63,7 +64,7 @@ Type out a message and press <enter> or use a command
 -> For input key mappings see:
   - https://github.com/charmbracelet/bubbles/blob/v0.21.0/textinput/textinput.go#L68
 `, unicode.IsSpace)))
-		} else if m.tetrisEnabled {
+		} else if m.tetrisConnected {
 			m.chatView.Push(chat.HelpMsg(m.Time, strings.TrimLeftFunc(`
 Input is queued until >50% of players have chosen/voted for the same input
 
@@ -118,15 +119,15 @@ Input is queued until >50% of players have chosen/voted for the same input
 	"/tetris": mkCommand(func(m *model, _, args string) tea.Cmd {
 		switch args {
 		case "":
-			if m.tetrisEnabled {
+			if m.tetrisConnected {
 				return nil
 			}
 
-			m.tetrisEnabled = true
+			m.tetrisConnected = true
 			m.cmdLine.Prompt = "tetris> "
 			m.cmdLine.Placeholder = "/ to open command line"
 			m.cmdLine.Blur()
-			return sendMsgCmd(m.ctx, m.Send, tetrisAddPlayerMsg(m.Id()))
+			return sendMsgCmd(m.ctx, m.Send, tetris.MPConnectPlayerMsg(m.Id()))
 		case "stop":
 			return m.exitTetrisCmd()
 		default:
@@ -139,18 +140,18 @@ Input is queued until >50% of players have chosen/voted for the same input
 }
 
 func (m *model) exitTetrisCmd() tea.Cmd {
-	m.tetrisEnabled = false
+	m.tetrisConnected = false
 	m.cmdLine.Prompt = "> "
 	m.cmdLine.Placeholder = ""
 	if !m.cmdLine.Focused() {
 		return m.cmdLine.Focus()
 	}
-	return sendMsgCmd(m.ctx, m.Send, tetrisRmPlayerMsg(m.Id()))
+	return sendMsgCmd(m.ctx, m.Send, tetris.MPDisconnectPlayerMsg(m.Id()))
 }
 
 var exitCommand = mkCommand(func(m *model, cmd, _ string) tea.Cmd {
 	switch {
-	case m.tetrisView != nil:
+	case m.tetrisConnected:
 		return m.exitTetrisCmd()
 	default:
 		return tea.Quit
