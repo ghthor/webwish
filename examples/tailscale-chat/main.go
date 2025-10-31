@@ -1,6 +1,7 @@
 package main
 
 // An example Bubble Tea chat server.
+//
 // It uses tailscale for authentication enabling both an HTTP webapp serviced
 // by gotty and an SSH app serviced by wish to use the same authentication
 // system.
@@ -29,6 +30,7 @@ import (
 	"github.com/charmbracelet/wish"
 	"github.com/charmbracelet/wish/logging"
 	"github.com/ghthor/webwish"
+	"github.com/ghthor/webwish/bubbles/chat"
 	"github.com/ghthor/webwish/bubbles/tetris"
 	"github.com/ghthor/webwish/mpty"
 	"github.com/ghthor/webwish/teamodel"
@@ -150,7 +152,7 @@ func newSshModel() tstea.NewSshModel {
 			ClientInfoModel: mpty.NewClientInfoModelFromSsh(pty, sess, who),
 
 			table:    table.New(),
-			chatView: unsafering.NewRingBuffer[chatMsg](300),
+			chatView: unsafering.NewRingBuffer[chat.Msg](300),
 		}
 	}
 }
@@ -163,53 +165,12 @@ func newHttpModel() tstea.NewHttpModel {
 			ClientInfoModel: mpty.NewClientInfoModelFromWebtty(sess, who),
 
 			table:    table.New(),
-			chatView: unsafering.NewRingBuffer[chatMsg](300),
+			chatView: unsafering.NewRingBuffer[chat.Msg](300),
 		}
 	}
 }
 
 type timeMsg time.Time
-
-type chatMsg struct {
-	cliAt time.Time
-	simAt time.Time
-	nick  string
-	who   string
-	sess  string
-	msg   string
-}
-
-func (m chatMsg) Id() string {
-	return m.who + " " + m.sess
-}
-
-func (m chatMsg) Nick() string {
-	if m.nick == "" {
-		return nickFromWho(m.who)
-
-	}
-	return m.nick
-}
-
-func (m chatMsg) SetNick(s ...string) chatMsg {
-	if m.nick != "" && len(s) == 0 {
-		return m
-	}
-	if len(s) == 0 {
-		m.nick = nickFromWho(m.who)
-	} else {
-		m.nick = s[0]
-	}
-	return m
-}
-
-func nickFromWho(who string) string {
-	nick, _, match := strings.Cut(who, "@")
-	if match {
-		return nick
-	}
-	return who
-}
 
 type namesMsg struct {
 	id    mpty.ClientId
@@ -270,21 +231,21 @@ func (m *chatServer) UpdateChat(msg tea.Msg) {
 	case *ringbuf.RingBuffer[tea.Msg]:
 		m.broadcaster = msg
 
-	case chatMsg:
-		msg.simAt = time.Now()
+	case chat.Msg:
+		msg.ServerAt = time.Now()
 		msg = msg.SetNick()
 
 		if m.broadcaster != nil {
 			m.broadcaster.Write(msg)
-			log.Debug("chat", "t", msg.simAt, "lag", msg.simAt.Sub(msg.cliAt), "who", msg.who, "sess", msg.sess, "msg", msg.msg)
+			log.Debug("chat", "t", msg.ServerAt, "lag", msg.ServerAt.Sub(msg.LocalAt), "who", msg.Who, "sess", msg.Sess, "msg", msg.Str)
 		} else {
-			log.Warn("dropped chat", "t", msg.simAt, "lag", msg.simAt.Sub(msg.cliAt), "who", msg.who, "sess", msg.sess, "msg", msg.msg)
+			log.Warn("dropped chat", "t", msg.ServerAt, "lag", msg.ServerAt.Sub(msg.LocalAt), "who", msg.Who, "sess", msg.Sess, "msg", msg.Str)
 		}
 
 	case namesMsg:
 		msg.names = slices.Sorted(maps.Keys(m.names))
 		for i := range msg.names {
-			msg.names[i] = nickFromWho(msg.names[i])
+			msg.names[i] = chat.NickFromWho(msg.names[i])
 		}
 		m.broadcaster.Write(msg)
 
@@ -298,11 +259,9 @@ func (m *chatServer) UpdateChat(msg tea.Msg) {
 			sessions[sess] = m.tick
 		}
 
-		m.broadcaster.Write(chatMsg{
-			simAt: m.tick,
-			who:   systemNick,
-			msg:   fmt.Sprintf("%s connected", msg),
-		})
+		m.broadcaster.Write(chat.SysMsg(m.tick,
+			fmt.Sprintf("%s connected", msg),
+		))
 
 	case mpty.ClientDisconnectMsg:
 		who, sess, _ := strings.Cut(string(msg), " ")
@@ -315,11 +274,9 @@ func (m *chatServer) UpdateChat(msg tea.Msg) {
 			delete(m.names, who)
 		}
 
-		m.broadcaster.Write(chatMsg{
-			simAt: m.tick,
-			who:   systemNick,
-			msg:   fmt.Sprintf("%s disconnected", msg),
-		})
+		m.broadcaster.Write(chat.SysMsg(m.tick,
+			fmt.Sprintf("%s disconnected", msg),
+		))
 
 	case time.Time:
 		m.tick = msg
@@ -471,7 +428,7 @@ type model struct {
 	table   *table.Table
 	view    viewport.Model
 
-	chatView *unsafering.RingBuffer[chatMsg]
+	chatView *unsafering.RingBuffer[chat.Msg]
 
 	tetrisView    tetrisView
 	tetrisEnabled bool
@@ -491,7 +448,7 @@ func (m *model) Err() error {
 	return m.err
 }
 
-func (m *model) AtRaw(row int) chatMsg {
+func (m *model) AtRaw(row int) chat.Msg {
 	msg, _ := m.chatView.AtInWindow(row, m.chatView.Len())
 	return msg
 }
@@ -511,14 +468,14 @@ func (m *model) At(row, cell int) string {
 	msg := m.AtRaw(row)
 	switch cell {
 	case COL_TS:
-		if msg.simAt.IsZero() {
+		if msg.ServerAt.IsZero() {
 			return ""
 		}
-		return msg.simAt.Format(time.TimeOnly)
+		return msg.ServerAt.Format(time.TimeOnly)
 	case COL_WHO:
 		return " " + msg.Nick()
 	case COL_MSG:
-		return " | " + msg.msg
+		return " | " + msg.Str
 	default:
 	}
 
@@ -565,14 +522,14 @@ func (m *model) Init() tea.Cmd {
 
 			switch col {
 			case COL_WHO:
-				switch msg.who {
+				switch msg.Who {
 				case systemNick, infoNick, helpNick:
 					return StyleSystemWho
 				}
 
 				return AlignRight
 			case COL_MSG:
-				switch msg.who {
+				switch msg.Who {
 				case systemNick, infoNick, helpNick:
 					return StyleSystemMsg
 				}
@@ -635,17 +592,16 @@ func (m *model) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 			case time.Time:
 				m.ClientInfoModel, cmd = m.UpdateInfo(msg)
 				cmds = append(cmds, cmd)
-			case chatMsg:
-				if m.quiet && msg.who == systemNick {
+			case chat.Msg:
+				if m.quiet && msg.Who == chat.SysNick {
 				} else {
 					m.chatView.Push(msg)
 				}
 			case namesMsg:
 				if msg.id == m.Id() {
-					m.chatView.Push(chatMsg{
-						who: systemNick,
-						msg: fmt.Sprintf("-> %d connected: %s", len(msg.names), strings.Join(msg.names, ", ")),
-					})
+					m.chatView.Push(chat.SysMsg(m.Time,
+						fmt.Sprintf("-> %d connected: %s", len(msg.names), strings.Join(msg.names, ", ")),
+					))
 				}
 			case tetrisView:
 				m.tetrisView = msg
@@ -765,11 +721,11 @@ func (m *model) CmdLineExecute() tea.Cmd {
 	}
 
 	// TODO: maybe style these type of messages differently?
-	m.chatView.Push(chatMsg{
-		simAt: m.Time,
-		who:   m.Who.UserProfile.LoginName,
-		sess:  m.Sess.RemoteAddr().String(),
-		msg:   value,
+	m.chatView.Push(chat.Msg{
+		LocalAt: m.Time,
+		Who:     m.Who.UserProfile.LoginName,
+		Sess:    m.Sess.RemoteAddr().String(),
+		Str:     value,
 	})
 
 	if c, ok := commands[cmd]; ok {
@@ -784,11 +740,11 @@ func (m *model) SendChatCmd(msg string) tea.Cmd {
 		who  = m.Who.UserProfile.LoginName
 		sess = m.Sess.RemoteAddr().String()
 		now  = time.Now()
-		chat = chatMsg{
-			cliAt: now,
-			who:   who,
-			sess:  sess,
-			msg:   msg,
+		chat = chat.Msg{
+			LocalAt: now,
+			Who:     who,
+			Sess:    sess,
+			Str:     msg,
 		}
 
 		send = m.Send
@@ -818,11 +774,11 @@ func (m *model) SendCountCmd(i int) tea.Cmd {
 
 	return func() tea.Msg {
 		for v := range i {
-			chat := chatMsg{
-				cliAt: time.Now(),
-				who:   who,
-				sess:  sess,
-				msg:   fmt.Sprint(v),
+			chat := chat.Msg{
+				LocalAt: time.Now(),
+				Who:     who,
+				Sess:    sess,
+				Str:     fmt.Sprint(v),
 			}
 			sendMsg(m.ctx, send, chat)
 		}

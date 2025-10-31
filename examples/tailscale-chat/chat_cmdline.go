@@ -9,6 +9,8 @@ import (
 	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/ghthor/webwish/bubbles/chat"
 )
 
 func formatToggle(b bool) string {
@@ -48,10 +50,7 @@ var commands = map[string]command{
 	"/help": mkCommand(func(m *model, _, _ string) tea.Cmd {
 		if !m.tetrisEnabled {
 			m.cmdLine.Placeholder = ""
-			m.chatView.Push(chatMsg{
-				cliAt: m.Time,
-				who:   helpNick,
-				msg: strings.TrimLeftFunc(`
+			m.chatView.Push(chat.HelpMsg(m.Time, strings.TrimLeftFunc(`
 Type out a message and press <enter> or use a command
 
 -> Available commands:
@@ -63,13 +62,9 @@ Type out a message and press <enter> or use a command
 
 -> For input key mappings see:
   - https://github.com/charmbracelet/bubbles/blob/v0.21.0/textinput/textinput.go#L68
-`, unicode.IsSpace),
-			})
+`, unicode.IsSpace)))
 		} else if m.tetrisEnabled {
-			m.chatView.Push(chatMsg{
-				cliAt: m.Time,
-				who:   helpNick,
-				msg: strings.TrimLeftFunc(`
+			m.chatView.Push(chat.HelpMsg(m.Time, strings.TrimLeftFunc(`
 Input is queued until >50% of players have chosen/voted for the same input
 
     [ d ]  [ f ]       [ j ]  [ k ]
@@ -81,8 +76,7 @@ Input is queued until >50% of players have chosen/voted for the same input
 -> Available commands:
 /exit                      - Exit tetris
 
-`, unicode.IsSpace),
-			})
+`, unicode.IsSpace)))
 		}
 		return nil
 	}),
@@ -103,11 +97,7 @@ Input is queued until >50% of players have chosen/voted for the same input
 
 	"/quiet": mkCommand(func(m *model, cmd, _ string) tea.Cmd {
 		m.quiet = !m.quiet
-		m.chatView.Push(chatMsg{
-			cliAt: m.Time,
-			who:   infoNick,
-			msg:   fmt.Sprintf("Quiet mode toggled %s", formatToggle(m.quiet)),
-		})
+		m.chatView.Push(chat.InfoMsg(m.Time, fmt.Sprintf("Quiet mode toggled %s", formatToggle(m.quiet))))
 		return nil
 	}),
 
@@ -122,11 +112,7 @@ Input is queued until >50% of players have chosen/voted for the same input
 	// TODO: /timestamp [time|datetime] - Prefix messages with a timestamp. You can also provide the UTC offset: /timestamp time +5h45m
 	"/timestamp": mkCommand(func(m *model, _, _ string) tea.Cmd {
 		m.showTimestamp = !m.showTimestamp
-		m.chatView.Push(chatMsg{
-			cliAt: m.Time,
-			who:   infoNick,
-			msg:   fmt.Sprintf("Timestamp is toggled %s", formatToggle(m.showTimestamp)),
-		})
+		m.chatView.Push(chat.InfoMsg(m.Time, fmt.Sprintf("Timestamp is toggled %s", formatToggle(m.showTimestamp))))
 		return nil
 	}),
 	"/tetris": mkCommand(func(m *model, _, args string) tea.Cmd {
