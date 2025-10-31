@@ -149,7 +149,7 @@ func newSshModel() tstea.NewSshModel {
 			ClientInfoModel: mpty.NewClientInfoModelFromSsh(pty, sess, who),
 
 			table:    table.New(),
-			chatView: unsafering.NewRingBuffer[chat.Msg](300),
+			chatView: unsafering.New[chat.Msg](300),
 		}
 	}
 }
@@ -162,7 +162,7 @@ func newHttpModel() tstea.NewHttpModel {
 			ClientInfoModel: mpty.NewClientInfoModelFromWebtty(sess, who),
 
 			table:    table.New(),
-			chatView: unsafering.NewRingBuffer[chat.Msg](300),
+			chatView: unsafering.New[chat.Msg](300),
 		}
 	}
 }

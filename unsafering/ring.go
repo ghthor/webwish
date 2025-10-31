@@ -10,7 +10,7 @@ type RingBuffer[T any] struct {
 	write int
 }
 
-func NewRingBuffer[T any](size int) *RingBuffer[T] {
+func New[T any](size int) *RingBuffer[T] {
 	return &RingBuffer[T]{data: make([]T, size), size: size}
 }
 
