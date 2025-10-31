@@ -22,7 +22,7 @@ func formatToggle(b bool) string {
 	return "OFF"
 }
 
-type commandFn func(m *model, cmd, rest string) tea.Cmd
+type commandFn func(m *Model, cmd, rest string) tea.Cmd
 
 type command struct {
 	fn commandFn
@@ -48,7 +48,7 @@ func mkCommand(f commandFn) command {
 /whois USER                - Information about USER.
 */
 var commands = map[string]command{
-	"/help": mkCommand(func(m *model, _, _ string) tea.Cmd {
+	"/help": mkCommand(func(m *Model, _, _ string) tea.Cmd {
 		if !m.tetrisConnected {
 			m.cmdLine.Placeholder = ""
 			m.chatView.Push(chat.HelpMsg(m.Time, strings.TrimLeftFunc(`
@@ -82,7 +82,7 @@ Input is queued until >50% of players have chosen/voted for the same input
 		return nil
 	}),
 
-	"/names": mkCommand(func(m *model, cmd, _ string) tea.Cmd {
+	"/names": mkCommand(func(m *Model, cmd, _ string) tea.Cmd {
 		var (
 			req  = chat.NamesReq{Requestor: m.Id()}
 			send = m.Send
@@ -96,13 +96,13 @@ Input is queued until >50% of players have chosen/voted for the same input
 		}
 	}),
 
-	"/quiet": mkCommand(func(m *model, cmd, _ string) tea.Cmd {
+	"/quiet": mkCommand(func(m *Model, cmd, _ string) tea.Cmd {
 		m.quiet = !m.quiet
 		m.chatView.Push(chat.InfoMsg(m.Time, fmt.Sprintf("Quiet mode toggled %s", formatToggle(m.quiet))))
 		return nil
 	}),
 
-	"/debug_perf": mkCommand(func(m *model, cmd, args string) tea.Cmd {
+	"/debug_perf": mkCommand(func(m *Model, cmd, args string) tea.Cmd {
 		i, err := strconv.Atoi(args)
 		if err != nil {
 			return m.SendChatCmd(fmt.Sprintf("%s => %v", m.cmdLine.Value(), err))
@@ -111,12 +111,12 @@ Input is queued until >50% of players have chosen/voted for the same input
 	}),
 
 	// TODO: /timestamp [time|datetime] - Prefix messages with a timestamp. You can also provide the UTC offset: /timestamp time +5h45m
-	"/timestamp": mkCommand(func(m *model, _, _ string) tea.Cmd {
+	"/timestamp": mkCommand(func(m *Model, _, _ string) tea.Cmd {
 		m.showTimestamp = !m.showTimestamp
 		m.chatView.Push(chat.InfoMsg(m.Time, fmt.Sprintf("Timestamp is toggled %s", formatToggle(m.showTimestamp))))
 		return nil
 	}),
-	"/tetris": mkCommand(func(m *model, _, args string) tea.Cmd {
+	"/tetris": mkCommand(func(m *Model, _, args string) tea.Cmd {
 		switch args {
 		case "":
 			if m.tetrisConnected {
@@ -139,7 +139,7 @@ Input is queued until >50% of players have chosen/voted for the same input
 	"/quit": exitCommand,
 }
 
-func (m *model) exitTetrisCmd() tea.Cmd {
+func (m *Model) exitTetrisCmd() tea.Cmd {
 	m.tetrisConnected = false
 	m.cmdLine.Prompt = "> "
 	m.cmdLine.Placeholder = ""
@@ -149,7 +149,7 @@ func (m *model) exitTetrisCmd() tea.Cmd {
 	return sendMsgCmd(m.ctx, m.Send, tetris.MPDisconnectPlayerMsg(m.Id()))
 }
 
-var exitCommand = mkCommand(func(m *model, cmd, _ string) tea.Cmd {
+var exitCommand = mkCommand(func(m *Model, cmd, _ string) tea.Cmd {
 	switch {
 	case m.tetrisConnected:
 		return m.exitTetrisCmd()

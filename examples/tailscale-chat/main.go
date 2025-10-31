@@ -106,6 +106,9 @@ func main() {
 	if err != nil {
 		log.Fatal("Could not create SSH server", "error", err)
 	}
+	webtty := tstea.NewTeaTYFactory(
+		ctx, ts.Client, newHttpModel(), mainprog.NewClientProgram(),
+	)
 
 	tsIPv4, _, err := ts.WaitForTailscaleIP(ctx)
 	if err != nil {
@@ -116,9 +119,7 @@ func main() {
 
 	err = errors.Join(
 		webwish.RunSSH(grpCtx, grp, cancel, ts.Ssh, s),
-		webwish.RunHTTP(grpCtx, grp, cancel, ts.Http, tstea.NewTeaTYFactory(
-			ctx, ts.Client, newHttpModel(), mainprog.NewClientProgram(),
-		), hostname),
+		webwish.RunHTTP(grpCtx, grp, cancel, ts.Http, webtty, hostname),
 	)
 	if err != nil {
 		log.Fatal("failed to start webwish", "error", err)
@@ -142,7 +143,7 @@ func main() {
 
 func newSshModel() tstea.NewSshModel {
 	return func(ctx context.Context, pty ssh.Pty, sess mpty.Session, who *apitype.WhoIsResponse) mpty.ClientModel {
-		return &model{
+		return &Model{
 			ctx: ctx,
 
 			ClientInfoModel: mpty.NewClientInfoModelFromSsh(pty, sess, who),
@@ -155,7 +156,7 @@ func newSshModel() tstea.NewSshModel {
 
 func newHttpModel() tstea.NewHttpModel {
 	return func(ctx context.Context, sess mpty.Session, who *apitype.WhoIsResponse) mpty.ClientModel {
-		return &model{
+		return &Model{
 			ctx: ctx,
 
 			ClientInfoModel: mpty.NewClientInfoModelFromWebtty(sess, who),
@@ -166,9 +167,7 @@ func newHttpModel() tstea.NewHttpModel {
 	}
 }
 
-type timeMsg time.Time
-
-type model struct {
+type Model struct {
 	*mpty.ClientInfoModel
 
 	b strings.Builder
@@ -196,14 +195,14 @@ type model struct {
 	err error
 }
 
-var _ table.Data = &model{}
-var _ mpty.ClientModel = &model{}
+var _ table.Data = &Model{}
+var _ mpty.ClientModel = &Model{}
 
-func (m *model) Err() error {
+func (m *Model) Err() error {
 	return m.err
 }
 
-func (m *model) AtRaw(row int) chat.Msg {
+func (m *Model) AtRaw(row int) chat.Msg {
 	msg, _ := m.chatView.AtInWindow(row, m.chatView.Len())
 	return msg
 }
@@ -215,7 +214,7 @@ const (
 	COL_SZ
 )
 
-func (m *model) At(row, cell int) string {
+func (m *Model) At(row, cell int) string {
 	if !m.showTimestamp {
 		cell++
 	}
@@ -237,10 +236,10 @@ func (m *model) At(row, cell int) string {
 	return ""
 }
 
-func (m *model) Rows() int {
+func (m *Model) Rows() int {
 	return m.chatView.Len()
 }
-func (m *model) Columns() int {
+func (m *Model) Columns() int {
 	if m.showTimestamp {
 		return 3
 	} else {
@@ -248,11 +247,11 @@ func (m *model) Columns() int {
 	}
 }
 
-func (m *model) SetTableOffset() {
+func (m *Model) SetTableOffset() {
 	m.table.Offset(max(0, m.chatView.Len()-m.ChatViewHeight()-1))
 }
 
-func (m *model) Init() tea.Cmd {
+func (m *Model) Init() tea.Cmd {
 	if m.cmds == nil {
 		m.cmds = make([]tea.Cmd, 0, 1)
 	}
@@ -301,11 +300,11 @@ func (m *model) Init() tea.Cmd {
 	return tea.Batch(m.cmdLine.Focus())
 }
 
-func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m.UpdateClient(msg)
 }
 
-func (m *model) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
+func (m *Model) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 	var (
 		cmd  tea.Cmd
 		cmds = m.cmds[:0]
@@ -384,7 +383,7 @@ func (m *model) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m *model) UpdateTetris(msg tea.Msg) tea.Cmd {
+func (m *Model) UpdateTetris(msg tea.Msg) tea.Cmd {
 	if !m.tetrisConnected {
 		return nil
 	}
@@ -401,7 +400,7 @@ func (m *model) UpdateTetris(msg tea.Msg) tea.Cmd {
 
 }
 
-func (m *model) View() string {
+func (m *Model) View() string {
 	b := &m.b
 	b.Reset()
 
@@ -432,17 +431,17 @@ func (m *model) View() string {
 	return b.String()
 }
 
-func (m *model) ChatViewHeight() int {
+func (m *Model) ChatViewHeight() int {
 	// win H - info H - cmdline H
 	return max(0, m.Height-5-1)
 }
 
-func (m *model) ViewportResize() {
+func (m *Model) ViewportResize() {
 	m.view.Height = m.ChatViewHeight()
 	m.view.Width = m.ClientInfoModel.Width
 }
 
-func (m *model) updateSuggestions(msg tea.Msg) {
+func (m *Model) updateSuggestions(msg tea.Msg) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -454,7 +453,7 @@ func (m *model) updateSuggestions(msg tea.Msg) {
 	}
 }
 
-func (m *model) CmdLineExecute() tea.Cmd {
+func (m *Model) CmdLineExecute() tea.Cmd {
 	if !m.cmdLine.Focused() {
 		return nil
 	}
@@ -490,7 +489,7 @@ func (m *model) CmdLineExecute() tea.Cmd {
 	return nil
 }
 
-func (m *model) SendChatCmd(msg string) tea.Cmd {
+func (m *Model) SendChatCmd(msg string) tea.Cmd {
 	var (
 		who  = m.Who.UserProfile.LoginName
 		sess = m.Sess.RemoteAddr().String()
@@ -515,7 +514,7 @@ func (m *model) SendChatCmd(msg string) tea.Cmd {
 	}
 }
 
-func (m *model) SendCountCmd(i int) tea.Cmd {
+func (m *Model) SendCountCmd(i int) tea.Cmd {
 	var (
 		who  = m.Who.UserProfile.LoginName
 		sess = m.Sess.RemoteAddr().String()
