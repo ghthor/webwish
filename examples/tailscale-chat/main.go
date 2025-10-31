@@ -11,11 +11,9 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"maps"
 	"net"
 	"os"
 	"os/signal"
-	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -37,7 +35,6 @@ import (
 	"github.com/ghthor/webwish/tshelper"
 	"github.com/ghthor/webwish/tstea"
 	"github.com/ghthor/webwish/unsafering"
-	"github.com/golang-cz/ringbuf"
 	overlay "github.com/rmhubbert/bubbletea-overlay"
 	"golang.org/x/sync/errgroup"
 	"tailscale.com/client/tailscale/apitype"
@@ -87,7 +84,7 @@ func main() {
 
 	grp, grpCtx := errgroup.WithContext(ctx)
 
-	mainprog := mpty.NewProgram(ctx, cancel, &chatServer{})
+	mainprog := mpty.NewProgram(ctx, cancel, &chat.ServerModel{})
 	select {
 	case <-ctx.Done():
 	case <-mainprog.RunIn(grp):
@@ -115,7 +112,6 @@ func main() {
 		log.Fatal("failed to wait for tailscale IP", "error", err)
 	}
 	log.Info("Starting SSH server", "addr", net.JoinHostPort(tsIPv4.String(), fmt.Sprint(sshPort)))
-
 	log.Infof("Starting HTTP server http://%s:%d", tsIPv4.String(), httpPort)
 
 	err = errors.Join(
@@ -171,111 +167,6 @@ func newHttpModel() tstea.NewHttpModel {
 }
 
 type timeMsg time.Time
-
-type namesMsg struct {
-	id    mpty.ClientId
-	names []string
-}
-
-type chatServer struct {
-	cmds        []tea.Cmd
-	broadcaster *ringbuf.RingBuffer[tea.Msg]
-
-	tick time.Time
-
-	names map[string]map[string]time.Time
-
-	tetris *tetris.MPModel
-}
-
-func (m *chatServer) Init() tea.Cmd {
-	if m.cmds == nil {
-		m.cmds = make([]tea.Cmd, 0, 2)
-	}
-	if m.names == nil {
-		m.names = make(map[string]map[string]time.Time, 10)
-	}
-	if m.tetris == nil {
-		m.tetris = &tetris.MPModel{}
-	}
-	return tea.Batch(
-		func() tea.Msg { return time.Now() },
-		m.tetris.Init(),
-	)
-}
-
-func (m *chatServer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	m.cmds = m.cmds[:0]
-	m.UpdateChat(msg)
-	m.cmds = append(m.cmds, m.UpdateTetris(msg))
-	return m, tea.Batch(m.cmds...)
-}
-
-func (m *chatServer) UpdateChat(msg tea.Msg) {
-	switch msg := msg.(type) {
-	case *ringbuf.RingBuffer[tea.Msg]:
-		m.broadcaster = msg
-
-	case chat.Msg:
-		msg.ServerAt = time.Now()
-		msg = msg.SetNick()
-
-		if m.broadcaster != nil {
-			m.broadcaster.Write(msg)
-			log.Debug("chat", "t", msg.ServerAt, "lag", msg.ServerAt.Sub(msg.LocalAt), "who", msg.Who, "sess", msg.Sess, "msg", msg.Str)
-		} else {
-			log.Warn("dropped chat", "t", msg.ServerAt, "lag", msg.ServerAt.Sub(msg.LocalAt), "who", msg.Who, "sess", msg.Sess, "msg", msg.Str)
-		}
-
-	case namesMsg:
-		msg.names = slices.Sorted(maps.Keys(m.names))
-		for i := range msg.names {
-			msg.names[i] = chat.NickFromWho(msg.names[i])
-		}
-		m.broadcaster.Write(msg)
-
-	case mpty.ClientConnectMsg:
-		who, sess, _ := strings.Cut(string(msg), " ")
-
-		sessions, ok := m.names[who]
-		if !ok {
-			m.names[who] = map[string]time.Time{sess: m.tick}
-		} else {
-			sessions[sess] = m.tick
-		}
-
-		m.broadcaster.Write(chat.SysMsg(m.tick,
-			fmt.Sprintf("%s connected", msg),
-		))
-
-	case mpty.ClientDisconnectMsg:
-		who, sess, _ := strings.Cut(string(msg), " ")
-
-		sessions, ok := m.names[who]
-		if ok {
-			delete(sessions, sess)
-		}
-		if len(sessions) == 0 {
-			delete(m.names, who)
-		}
-
-		m.broadcaster.Write(chat.SysMsg(m.tick,
-			fmt.Sprintf("%s disconnected", msg),
-		))
-
-	case time.Time:
-		m.tick = msg
-	}
-}
-
-func (m *chatServer) UpdateTetris(msg tea.Msg) tea.Cmd {
-	cmd := m.tetris.UpdateTetris(msg)
-	return cmd
-}
-
-func (m *chatServer) View() string {
-	return ""
-}
 
 type model struct {
 	*mpty.ClientInfoModel
@@ -461,10 +352,10 @@ func (m *model) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 				} else {
 					m.chatView.Push(msg)
 				}
-			case namesMsg:
-				if msg.id == m.Id() {
+			case chat.NamesReq:
+				if msg.Requestor == m.Id() {
 					m.chatView.Push(chat.SysMsg(m.Time,
-						fmt.Sprintf("-> %d connected: %s", len(msg.names), strings.Join(msg.names, ", ")),
+						fmt.Sprintf("-> %d connected: %s", len(msg.Names), strings.Join(msg.Names, ", ")),
 					))
 				}
 			case tetris.MPView:

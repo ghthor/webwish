@@ -84,7 +84,7 @@ Input is queued until >50% of players have chosen/voted for the same input
 
 	"/names": mkCommand(func(m *model, cmd, _ string) tea.Cmd {
 		var (
-			req  = namesMsg{id: m.Id()}
+			req  = chat.NamesReq{Requestor: m.Id()}
 			send = m.Send
 		)
 		return func() tea.Msg {
