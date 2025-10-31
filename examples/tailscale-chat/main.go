@@ -46,12 +46,6 @@ var (
 	hostname string = "tailscale-chat"
 )
 
-const (
-	systemNick = "system"
-	helpNick   = "help"
-	infoNick   = "info"
-)
-
 var (
 	Bold       = lipgloss.NewStyle().Bold(true)
 	None       = lipgloss.NewStyle()
@@ -277,14 +271,14 @@ func (m *Model) Init() tea.Cmd {
 			switch col {
 			case COL_WHO:
 				switch msg.Who {
-				case systemNick, infoNick, helpNick:
+				case chat.SysNick, chat.InfoNick, chat.HelpNick:
 					return StyleSystemWho
 				}
 
 				return AlignRight
 			case COL_MSG:
 				switch msg.Who {
-				case systemNick, infoNick, helpNick:
+				case chat.SysNick, chat.InfoNick, chat.HelpNick:
 					return StyleSystemMsg
 				}
 			default:
