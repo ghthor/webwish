@@ -30,8 +30,8 @@ var (
 	StyleSystemMsg = StyleSystem
 )
 
-func NewClient(ctx context.Context, info *mpty.ClientInfoModel) *Client {
-	return &Client{
+func NewClient(ctx context.Context, info *mpty.ClientInfoModel, cmds ...Cmd) *Client {
+	m := &Client{
 		ctx: ctx,
 
 		info: info,
@@ -39,6 +39,8 @@ func NewClient(ctx context.Context, info *mpty.ClientInfoModel) *Client {
 		table:    table.New(),
 		chatView: unsafering.New[Msg](300),
 	}
+	m.SetupCmdPalette(cmds...)
+	return m
 }
 
 type Client struct {
@@ -138,8 +140,6 @@ func (m *Client) Init() tea.Cmd {
 	if m.cmds == nil {
 		m.cmds = make([]tea.Cmd, 0, 1)
 	}
-
-	m.SetupCmdPalette()
 
 	// TODO: dynamic suggestions
 	m.cmdLine = textinput.New()

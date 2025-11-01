@@ -123,7 +123,7 @@ func newSshModel(ctx context.Context, pty ssh.Pty, sess mpty.Session, who *apity
 		ctx: ctx,
 
 		ClientInfoModel: info,
-		chat:            chat.NewClient(ctx, info),
+		showInfo:        true,
 	}
 }
 
@@ -133,7 +133,7 @@ func newHttpModel(ctx context.Context, sess mpty.Session, who *apitype.WhoIsResp
 		ctx: ctx,
 
 		ClientInfoModel: info,
-		chat:            chat.NewClient(ctx, info),
+		showInfo:        true,
 	}
 }
 
@@ -141,6 +141,7 @@ type Model struct {
 	ctx context.Context
 
 	*mpty.ClientInfoModel
+	showInfo bool
 
 	chat *chat.Client
 
@@ -154,10 +155,24 @@ func (m *Model) Init() tea.Cmd {
 	if m.cmds == nil {
 		m.cmds = make([]tea.Cmd, 0, 2)
 	}
+	m.configureChat()
+
 	return tea.Batch(
 		m.ClientInfoModel.Init(),
 		m.chat.Init(),
 	)
+}
+
+func (m *Model) configureChat() {
+	m.chat = chat.NewClient(m.ctx, m.ClientInfoModel, chat.Cmd{
+		Use:   "info",
+		Short: "Toggle client terminal info.",
+		Run: func(cmd *chat.Cmd, args []string) tea.Cmd {
+			m.showInfo = !m.showInfo
+			m.setChatSize()
+			return nil
+		},
+	})
 }
 
 func (m *Model) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
@@ -168,9 +183,9 @@ func (m *Model) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 	m.ClientInfoModel, cmd = m.ClientInfoModel.UpdateInfo(msg)
 	cmds = append(cmds, cmd)
 
-	switch msg := msg.(type) {
+	switch msg.(type) {
 	case tea.WindowSizeMsg:
-		m.chat.SetSize(msg.Width, msg.Height-m.ClientInfoModel.ViewHeight())
+		m.setChatSize()
 	}
 
 	m.chat, cmd = m.chat.UpdateChat(msg)
@@ -188,6 +203,14 @@ func (m *Model) View() string {
 	m.chat.ViewTo(b)
 
 	return b.String()
+}
+
+func (m *Model) setChatSize() {
+	if m.showInfo {
+		m.chat.SetSize(m.Width, m.Height-m.ClientInfoModel.ViewHeight())
+	} else {
+		m.chat.SetSize(m.Width, m.Height)
+	}
 }
 
 func (m *Model) Err() error {

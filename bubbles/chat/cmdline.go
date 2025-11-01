@@ -32,7 +32,7 @@ func formatToggle(b bool) string {
 /theme [colors|...]        - Set your color theme.
 /whois USER                - Information about USER.
 */
-func (m *Client) SetupCmdPalette() {
+func (m *Client) SetupCmdPalette(additionalCmds ...Cmd) {
 	cmds := make([]Cmd, 0, 10)
 
 	// help
@@ -163,6 +163,8 @@ Input is queued until >50% of players have chosen/voted for the same input
 			return nil
 		},
 	})
+
+	cmds = append(cmds, additionalCmds...)
 
 	p := NewCmdPalette("/", cmds...)
 	m.cmdPalette = p
