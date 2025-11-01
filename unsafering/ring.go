@@ -3,25 +3,25 @@
 // writing. Wrapping it in a mutex could enable that type of usecase if needed.
 package unsafering
 
-type RingBuffer[T any] struct {
+type Buffer[T any] struct {
 	data  []T
 	size  int
 	count int
 	write int
 }
 
-func New[T any](size int) *RingBuffer[T] {
-	return &RingBuffer[T]{data: make([]T, size), size: size}
+func New[T any](size int) *Buffer[T] {
+	return &Buffer[T]{data: make([]T, size), size: size}
 }
 
-func (r *RingBuffer[T]) Push(v T) {
+func (r *Buffer[T]) Push(v T) {
 	r.data[r.write] = v
 	r.write = (r.write + 1) % r.size
 	r.count++
 	r.count = min(r.count, r.size)
 }
 
-func (r *RingBuffer[T]) Len() int {
+func (r *Buffer[T]) Len() int {
 	if r.count < r.size {
 		return r.count
 	}
@@ -31,7 +31,7 @@ func (r *RingBuffer[T]) Len() int {
 // ReadRecent returns the n most recent elements (oldest→newest).
 // TODO: add a version of this method that can take a pre-alloced slice and
 // fill it based on the cap or len
-func (r *RingBuffer[T]) ReadRecent(n int) []T {
+func (r *Buffer[T]) ReadRecent(n int) []T {
 	if n > r.Len() {
 		n = r.Len()
 	}
@@ -51,7 +51,7 @@ func (r *RingBuffer[T]) ReadRecent(n int) []T {
 //	With buffer [..., 8, 9, 10, 11, 12]
 //	AtInWindow(0, 5) == 8
 //	AtInWindow(4, 5) == 12
-func (r *RingBuffer[T]) AtInWindow(i, window int) (val T, ok bool) {
+func (r *Buffer[T]) AtInWindow(i, window int) (val T, ok bool) {
 	length := r.Len()
 	if window > length {
 		window = length

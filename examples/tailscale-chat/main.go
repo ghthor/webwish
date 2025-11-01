@@ -176,7 +176,7 @@ type Model struct {
 	table   *table.Table
 	view    viewport.Model
 
-	chatView *unsafering.RingBuffer[chat.Msg]
+	chatView *unsafering.Buffer[chat.Msg]
 
 	tetrisView      tetris.MPView
 	tetrisConnected bool
