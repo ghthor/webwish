@@ -41,9 +41,9 @@ func (m *Client) SetupCmdPalette() {
 		Run: func(cmd *Cmd, args []string) tea.Cmd {
 			if !m.tetrisConnected {
 				m.cmdLine.Placeholder = ""
-				m.chatView.Push(HelpMsg(m.Time, m.cmdPalette.Usage()))
+				m.chatView.Push(HelpMsg(m.info.Time, m.cmdPalette.Usage()))
 			} else if m.tetrisConnected {
-				m.chatView.Push(HelpMsg(m.Time, strings.TrimLeftFunc(`
+				m.chatView.Push(HelpMsg(m.info.Time, strings.TrimLeftFunc(`
 Input is queued until >50% of players have chosen/voted for the same input
 
     [ d ]  [ f ]       [ j ]  [ k ]
@@ -101,7 +101,7 @@ Input is queued until >50% of players have chosen/voted for the same input
 		Short: "Toggle system announcements.",
 		Run: func(cmd *Cmd, args []string) tea.Cmd {
 			m.quiet = !m.quiet
-			m.chatView.Push(InfoMsg(m.Time, fmt.Sprintf("Quiet mode toggled %s", formatToggle(m.quiet))))
+			m.chatView.Push(InfoMsg(m.info.Time, fmt.Sprintf("Quiet mode toggled %s", formatToggle(m.quiet))))
 			return nil
 		},
 	})
@@ -113,7 +113,7 @@ Input is queued until >50% of players have chosen/voted for the same input
 		Short: "Toggle chat timestamps.",
 		Run: func(cmd *Cmd, args []string) tea.Cmd {
 			m.showTimestamp = !m.showTimestamp
-			m.chatView.Push(InfoMsg(m.Time, fmt.Sprintf("Timestamp is toggled %s", formatToggle(m.showTimestamp))))
+			m.chatView.Push(InfoMsg(m.info.Time, fmt.Sprintf("Timestamp is toggled %s", formatToggle(m.showTimestamp))))
 			return nil
 		},
 	})

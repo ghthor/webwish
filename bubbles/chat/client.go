@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -33,7 +34,7 @@ func NewClient(ctx context.Context, info *mpty.ClientInfoModel) *Client {
 	return &Client{
 		ctx: ctx,
 
-		ClientInfoModel: info,
+		info: info,
 
 		table:    table.New(),
 		chatView: unsafering.New[Msg](300),
@@ -41,9 +42,11 @@ func NewClient(ctx context.Context, info *mpty.ClientInfoModel) *Client {
 }
 
 type Client struct {
-	*mpty.ClientInfoModel
+	info *mpty.ClientInfoModel
 
 	b strings.Builder
+
+	Width, Height int
 
 	Send mpty.Input
 
@@ -72,6 +75,10 @@ type Client struct {
 
 var _ table.Data = &Client{}
 var _ mpty.ClientModel = &Client{}
+
+func (m *Client) Id() mpty.ClientId {
+	return m.info.Id()
+}
 
 func (m *Client) Err() error {
 	return m.err
@@ -123,7 +130,7 @@ func (m *Client) Columns() int {
 	}
 }
 
-func (m *Client) SetTableOffset() {
+func (m *Client) setTableOffset() {
 	m.table.Offset(max(0, m.chatView.Len()-m.ChatViewHeight()-1))
 }
 
@@ -193,15 +200,10 @@ func (m *Client) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 		cmds = m.cmds[:0]
 	)
 
-	m.ClientInfoModel, cmd = m.UpdateInfo(msg)
+	m.info, cmd = m.info.UpdateInfo(msg)
 	cmds = append(cmds, cmd)
 
 	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.cmdLine.Width = msg.Width
-		m.ViewportResize()
-		m.SetTableOffset()
-
 	case mpty.Input:
 		m.Send = msg
 
@@ -227,7 +229,7 @@ func (m *Client) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 		for _, msg := range msg {
 			switch msg := msg.(type) {
 			case time.Time:
-				m.ClientInfoModel, cmd = m.UpdateInfo(msg)
+				m.info, cmd = m.info.UpdateInfo(msg)
 				cmds = append(cmds, cmd)
 			case Msg:
 				if m.quiet && msg.Who == SysNick {
@@ -236,7 +238,7 @@ func (m *Client) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 				}
 			case NamesReq:
 				if msg.Requestor == m.Id() {
-					m.chatView.Push(SysMsg(m.Time,
+					m.chatView.Push(SysMsg(m.info.Time,
 						fmt.Sprintf("-> %d connected: %s", len(msg.Names), strings.Join(msg.Names, ", ")),
 					))
 				}
@@ -248,13 +250,13 @@ func (m *Client) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 
 			case error:
 				m.err = msg
-				log.Warn("client fatal", "error", msg, "who", m.Who.UserProfile.LoginName, "sess", m.Sess.RemoteAddr().String())
+				log.Warn("client fatal", "error", msg, "who", m.info.Who.UserProfile.LoginName, "sess", m.info.Sess.RemoteAddr().String())
 				return m, tea.Quit
 			default:
 				log.Warnf("unhandled broadcast message type: %T", msg)
 			}
 		}
-		m.SetTableOffset()
+		m.setTableOffset()
 	}
 
 	m.cmdLine, cmd = m.cmdLine.Update(msg)
@@ -288,8 +290,11 @@ func (m *Client) View() string {
 	b := &m.b
 	b.Reset()
 
-	fmt.Fprint(b, m.ClientInfoModel.View())
+	m.ViewTo(b)
+	return b.String()
+}
 
+func (m *Client) ViewTo(w io.Writer) {
 	// TODO: guard with render bool
 	t := m.table.Render()
 	t = lipgloss.PlaceVertical(m.ChatViewHeight(), lipgloss.Bottom, t)
@@ -305,24 +310,31 @@ func (m *Client) View() string {
 		)
 		m.overlay.Foreground = teamodel.String(*m.tetrisView)
 		m.overlay.Background = teamodel.String(v)
-		fmt.Fprintln(b, m.overlay.View())
+		fmt.Fprintln(w, m.overlay.View())
 	} else {
-		fmt.Fprintln(b, v)
+		fmt.Fprintln(w, v)
 	}
 
-	fmt.Fprint(b, m.cmdLine.View())
-
-	return b.String()
+	fmt.Fprint(w, m.cmdLine.View())
 }
 
 func (m *Client) ChatViewHeight() int {
-	// win H - info H - cmdline H
-	return max(0, m.Height-5-1)
+	// win H - cmdline H
+	return max(0, m.Height-1)
 }
 
-func (m *Client) ViewportResize() {
+func (m *Client) SetSize(w, h int) {
+	m.Width = w
+	m.Height = h
+	m.cmdLine.Width = w
+
+	m.viewportResize()
+	m.setTableOffset()
+}
+
+func (m *Client) viewportResize() {
 	m.view.Height = m.ChatViewHeight()
-	m.view.Width = m.ClientInfoModel.Width
+	m.view.Width = m.Width
 }
 
 func (m *Client) updateSuggestions(msg tea.Msg) {
@@ -362,9 +374,9 @@ func (m *Client) cmdLineExecute() tea.Cmd {
 
 	// TODO: maybe style these type of messages differently?
 	m.chatView.Push(Msg{
-		LocalAt: m.Time,
-		Who:     m.Who.UserProfile.LoginName,
-		Sess:    m.Sess.RemoteAddr().String(),
+		LocalAt: m.info.Time,
+		Who:     m.info.Who.UserProfile.LoginName,
+		Sess:    m.info.Sess.RemoteAddr().String(),
 		Str:     value,
 	})
 
@@ -378,8 +390,8 @@ func (m *Client) cmdLineExecute() tea.Cmd {
 
 func (m *Client) sendChatCmd(msg string) tea.Cmd {
 	var (
-		who  = m.Who.UserProfile.LoginName
-		sess = m.Sess.RemoteAddr().String()
+		who  = m.info.Who.UserProfile.LoginName
+		sess = m.info.Sess.RemoteAddr().String()
 		now  = time.Now()
 		chat = Msg{
 			LocalAt: now,
@@ -403,8 +415,8 @@ func (m *Client) sendChatCmd(msg string) tea.Cmd {
 
 func (m *Client) sendCountCmd(i int) tea.Cmd {
 	var (
-		who  = m.Who.UserProfile.LoginName
-		sess = m.Sess.RemoteAddr().String()
+		who  = m.info.Who.UserProfile.LoginName
+		sess = m.info.Sess.RemoteAddr().String()
 
 		send = m.Send
 	)

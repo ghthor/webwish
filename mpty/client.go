@@ -94,6 +94,6 @@ func (m *ClientInfoModel) View() string {
 	return b.String()
 }
 
-func (m *ClientId) Height() int {
+func (m *ClientInfoModel) ViewHeight() int {
 	return 5
 }

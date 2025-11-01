@@ -14,6 +14,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -143,6 +144,7 @@ type Model struct {
 
 	chat *chat.Client
 
+	b    strings.Builder
 	cmds []tea.Cmd
 }
 
@@ -166,6 +168,11 @@ func (m *Model) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 	m.ClientInfoModel, cmd = m.ClientInfoModel.UpdateInfo(msg)
 	cmds = append(cmds, cmd)
 
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.chat.SetSize(msg.Width, msg.Height-m.ClientInfoModel.ViewHeight())
+	}
+
 	m.chat, cmd = m.chat.UpdateChat(msg)
 	cmds = append(cmds, cmd)
 
@@ -174,7 +181,13 @@ func (m *Model) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 }
 
 func (m *Model) View() string {
-	return m.chat.View()
+	b := &m.b
+	b.Reset()
+
+	fmt.Fprint(b, m.ClientInfoModel.View())
+	m.chat.ViewTo(b)
+
+	return b.String()
 }
 
 func (m *Model) Err() error {
