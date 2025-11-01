@@ -39,24 +39,11 @@ func (m *Model) SetupCmdPalette() {
 
 	// help
 	cmds = append(cmds, chat.Cmd{
-		// TODO: auto generated help from the pallete
 		Use: "help",
 		Run: func(cmd *chat.Cmd, args []string) tea.Cmd {
 			if !m.tetrisConnected {
 				m.cmdLine.Placeholder = ""
-				m.chatView.Push(chat.HelpMsg(m.Time, strings.TrimLeftFunc(`
-Type out a message and press <enter> or use a command
-
--> Available commands:
-/names                     - List users who are connected.
-/quiet                     - Toggle system announcements.
-/timestamp                 - Toggle chat timestamps
-/tetris                    - Start/Join chat plays tetris
-/exit                      - Exit the chat (aliases: /quit, /q) Ctrl+c will also quit
-
--> For input key mappings see:
-  - https://github.com/charmbracelet/bubbles/blob/v0.21.0/textinput/textinput.go#L68
-`, unicode.IsSpace)))
+				m.chatView.Push(chat.HelpMsg(m.Time, m.cmdPalette.Usage()))
 			} else if m.tetrisConnected {
 				m.chatView.Push(chat.HelpMsg(m.Time, strings.TrimLeftFunc(`
 Input is queued until >50% of players have chosen/voted for the same input
@@ -79,6 +66,7 @@ Input is queued until >50% of players have chosen/voted for the same input
 	// exit
 	cmds = append(cmds, chat.Cmd{
 		Use:     "exit",
+		Short:   "Exit the chat, ctrl+c will also exit",
 		Aliases: []string{"quit", "q"},
 		Run: func(cmd *chat.Cmd, args []string) tea.Cmd {
 			switch {
@@ -92,7 +80,8 @@ Input is queued until >50% of players have chosen/voted for the same input
 
 	// names
 	cmds = append(cmds, chat.Cmd{
-		Use: "names",
+		Use:   "names",
+		Short: "List users who are connected.",
 		Run: func(cmd *chat.Cmd, args []string) tea.Cmd {
 			var (
 				req  = chat.NamesReq{Requestor: m.Id()}
@@ -110,7 +99,8 @@ Input is queued until >50% of players have chosen/voted for the same input
 
 	// quiet
 	cmds = append(cmds, chat.Cmd{
-		Use: "quiet",
+		Use:   "quiet",
+		Short: "Toggle system announcements.",
 		Run: func(cmd *chat.Cmd, args []string) tea.Cmd {
 			m.quiet = !m.quiet
 			m.chatView.Push(chat.InfoMsg(m.Time, fmt.Sprintf("Quiet mode toggled %s", formatToggle(m.quiet))))
@@ -121,7 +111,8 @@ Input is queued until >50% of players have chosen/voted for the same input
 	// timestamp
 	cmds = append(cmds, chat.Cmd{
 		// TODO: /timestamp [time|datetime] - Prefix messages with a timestamp. You can also provide the UTC offset: /timestamp time +5h45m
-		Use: "timestamp",
+		Use:   "timestamp",
+		Short: "Toggle chat timestamps.",
 		Run: func(cmd *chat.Cmd, args []string) tea.Cmd {
 			m.showTimestamp = !m.showTimestamp
 			m.chatView.Push(chat.InfoMsg(m.Time, fmt.Sprintf("Timestamp is toggled %s", formatToggle(m.showTimestamp))))
@@ -131,7 +122,7 @@ Input is queued until >50% of players have chosen/voted for the same input
 
 	// debug_perf
 	cmds = append(cmds, chat.Cmd{
-		Use:    "debug_perf [INT]",
+		Use:    "debug_perf <INT>",
 		Hidden: true,
 		Run: func(cmd *chat.Cmd, args []string) tea.Cmd {
 			if len(args) == 1 {
@@ -148,7 +139,8 @@ Input is queued until >50% of players have chosen/voted for the same input
 
 	// tetris
 	cmds = append(cmds, chat.Cmd{
-		Use: "tetris",
+		Use:   "tetris [exit]",
+		Short: "Start/Join chat plays tetris.",
 		Run: func(cmd *chat.Cmd, args []string) tea.Cmd {
 			argsStr := ""
 			if len(args) > 1 {
@@ -166,7 +158,7 @@ Input is queued until >50% of players have chosen/voted for the same input
 				m.cmdLine.Placeholder = "/ to open command line"
 				m.cmdLine.Blur()
 				return sendMsgCmd(m.ctx, m.Send, tetris.MPConnectPlayerMsg(m.Id()))
-			case "stop":
+			case "exit":
 				return m.exitTetrisCmd()
 			default:
 			}
@@ -174,7 +166,7 @@ Input is queued until >50% of players have chosen/voted for the same input
 		},
 	})
 
-	p := chat.NewCmdPalette('/', cmds...)
+	p := chat.NewCmdPalette("/", cmds...)
 	m.cmdPalette = p
 }
 

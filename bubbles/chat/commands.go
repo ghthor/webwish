@@ -1,8 +1,12 @@
 package chat
 
 import (
+	"fmt"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
+	"text/tabwriter"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -25,7 +29,7 @@ type Cmd struct {
 }
 
 type CmdPalette struct {
-	leader rune
+	leader string
 
 	cmds    map[string]Cmd
 	aliases map[string]Cmd
@@ -33,7 +37,7 @@ type CmdPalette struct {
 	suggestions []string
 }
 
-func NewCmdPalette(leader rune, cmds ...Cmd) CmdPalette {
+func NewCmdPalette(leader string, cmds ...Cmd) CmdPalette {
 	p := CmdPalette{
 		leader:      leader,
 		cmds:        make(map[string]Cmd, len(cmds)),
@@ -69,6 +73,42 @@ func (p CmdPalette) Find(cmd string) *Cmd {
 	}
 
 	return nil
+}
+
+func (p CmdPalette) Usage() string {
+	var b strings.Builder
+
+	fmt.Fprintln(&b, strings.TrimSpace(`
+Type out a message and press <enter> or use a command
+
+-> Available commands:
+`))
+
+	cmds := slices.Sorted(maps.Keys(p.cmds))
+	t := tabwriter.NewWriter(&b, 1, 1, 2, ' ', 0)
+	for _, key := range cmds {
+		if key == "help" {
+			continue
+		}
+
+		cmd := p.cmds[key]
+		if cmd.Hidden {
+			continue
+		}
+
+		fmt.Fprintf(t, "%s%s\t- %s", p.leader, cmd.Use, cmd.Short)
+		if len(cmd.Aliases) > 0 {
+			fmt.Fprintf(t, " (aliases: %s)", strings.Join(cmd.Aliases, ", "))
+		}
+		fmt.Fprintln(t, "\t")
+	}
+	t.Flush()
+	fmt.Fprint(&b, `
+-> For input key mappings see:
+  - https://github.com/charmbracelet/bubbles/blob/v0.21.0/textinput/textinput.go#L68
+`)
+
+	return b.String()
 }
 
 func (p CmdPalette) Suggestions() []string {
