@@ -30,11 +30,11 @@ func formatToggle(b bool) string {
 /nick NAME                 - Rename yourself.
 /reply MESSAGE             - Reply with MESSAGE to the previous private message.
 /theme [colors|...]        - Set your color theme.
-/whois USER                - Information about USER.
 */
 func (m *Client) SetupCmdPalette(additionalCmds ...Cmd) {
 	cmds := make([]Cmd, 0, 10)
 
+	// TODO: make help configurable so that tetris is like a plugin or something
 	// help
 	cmds = append(cmds, Cmd{
 		Use: "help",
@@ -95,6 +95,30 @@ Input is queued until >50% of players have chosen/voted for the same input
 		},
 	})
 
+	// whois
+	cmds = append(cmds, Cmd{
+		Use:   "whois <USER>",
+		Short: "Infomation about USER",
+		Run: func(cmd *Cmd, args []string) tea.Cmd {
+			if len(args) == 1 {
+				m.InfoMsg("argument required: " + cmd.Use)
+				return nil
+			}
+
+			var (
+				req  = WhoisReq{Requestor: m.Id(), User: args[1]}
+				send = m.Send
+			)
+			return func() tea.Msg {
+				select {
+				case <-m.ctx.Done():
+				case send <- req:
+				}
+				return nil
+			}
+		},
+	})
+
 	// quiet
 	cmds = append(cmds, Cmd{
 		Use:   "quiet",
@@ -124,12 +148,14 @@ Input is queued until >50% of players have chosen/voted for the same input
 		Hidden: true,
 		Run: func(cmd *Cmd, args []string) tea.Cmd {
 			if len(args) == 1 {
-				return m.sendChatCmd("argument required: " + cmd.Use)
+				m.InfoMsg("argument required: " + cmd.Use)
+				return nil
 			}
 
 			i, err := strconv.Atoi(args[1])
 			if err != nil {
-				return m.sendChatCmd(fmt.Sprintf("%s => %v: %s", m.cmdLine.Value(), err, cmd.Use))
+				m.InfoMsg(fmt.Sprintf("%s => %v: %s", m.cmdLine.Value(), err, cmd.Use))
+				return nil
 			}
 			return m.sendCountCmd(i)
 		},

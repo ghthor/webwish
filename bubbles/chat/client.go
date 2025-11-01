@@ -242,6 +242,14 @@ func (m *Client) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 						fmt.Sprintf("-> %d connected: %s", len(msg.Names), strings.Join(msg.Names, ", ")),
 					))
 				}
+			case WhoisReq:
+				if msg.Requestor == m.Id() {
+					if len(msg.Results) == 0 {
+						m.InfoMsg("user not found")
+					} else {
+						m.InfoMsg("\n" + strings.Join(msg.Results, "\n"))
+					}
+				}
 			case tetris.MPView:
 				m.tetrisView = msg
 
@@ -386,6 +394,10 @@ func (m *Client) cmdLineExecute() tea.Cmd {
 	}
 
 	return nil
+}
+
+func (m *Client) InfoMsg(s string) {
+	m.chatView.Push(InfoMsg(m.info.Time, s))
 }
 
 func (m *Client) sendChatCmd(msg string) tea.Cmd {

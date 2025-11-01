@@ -19,6 +19,12 @@ type NamesReq struct {
 	Names     []string
 }
 
+type WhoisReq struct {
+	Requestor mpty.ClientId
+	User      string
+	Results   []string
+}
+
 type ServerModel struct {
 	cmds        []tea.Cmd
 	broadcaster *ringbuf.RingBuffer[tea.Msg]
@@ -76,6 +82,9 @@ func (m *ServerModel) UpdateChat(msg tea.Msg) {
 		}
 		m.broadcaster.Write(msg)
 
+	case WhoisReq:
+		m.broadcaster.Write(m.whoisReq(msg))
+
 	case mpty.ClientConnectMsg:
 		who, sess, _ := strings.Cut(string(msg), " ")
 
@@ -117,4 +126,41 @@ func (m *ServerModel) UpdateTetris(msg tea.Msg) tea.Cmd {
 
 func (m *ServerModel) View() string {
 	return ""
+}
+
+func FormatTimeAsAge(t time.Time, now time.Time) string {
+	age := now.Sub(t)
+	s, m := age.Seconds(), age.Minutes()
+	switch {
+	case s < 1:
+		return "0 s"
+	case m < 1:
+		return fmt.Sprintf("%.f s", s)
+	case m/60 < 1:
+		return fmt.Sprintf("%.f m", m)
+	case m/60 < 24:
+		return fmt.Sprintf("%.f h", m/60)
+	case m/60/24 < 7:
+		return fmt.Sprintf("%.f d", m/60/24)
+	default:
+		return fmt.Sprintf("%.f w", m/60/24/7)
+	}
+}
+
+func (m *ServerModel) whoisReq(r WhoisReq) WhoisReq {
+	sessions, ok := m.names[r.User]
+	if ok {
+		for sess := range sessions {
+			r.Results = append(r.Results, fmt.Sprintf("%s %s", r.User, sess))
+		}
+		return r
+	}
+	for who, sessions := range m.names {
+		if strings.HasPrefix(who, r.User) {
+			for sess, since := range sessions {
+				r.Results = append(r.Results, fmt.Sprintf("%s %s (%s)", who, sess, FormatTimeAsAge(since, m.tick)))
+			}
+		}
+	}
+	return r
 }
