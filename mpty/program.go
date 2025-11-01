@@ -138,7 +138,7 @@ func NewProgram(ctx context.Context, cancel context.CancelCauseFunc, m tea.Model
 	}
 }
 
-func (p Program) RunIn(grp *errgroup.Group) (started chan struct{}) {
+func (p Program) StartIn(ctx context.Context, grp *errgroup.Group) error {
 	grp.Go(func() error {
 		_, serr := p.Program.Run()
 		if serr != nil && !errors.Is(serr, context.Canceled) {
@@ -161,7 +161,13 @@ func (p Program) RunIn(grp *errgroup.Group) (started chan struct{}) {
 			}
 		}
 	})
-	return p.started
+
+	select {
+	case <-ctx.Done():
+		return p.ctx.Err()
+	case <-p.started:
+		return nil
+	}
 }
 
 type NewClientProgram func(context.Context, ClientModel, ...tea.ProgramOption) *tea.Program

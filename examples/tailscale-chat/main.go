@@ -79,9 +79,9 @@ func main() {
 	grp, grpCtx := errgroup.WithContext(ctx)
 
 	mainprog := mpty.NewProgram(ctx, cancel, &chat.ServerModel{})
-	select {
-	case <-ctx.Done():
-	case <-mainprog.RunIn(grp):
+	err := mainprog.StartIn(ctx, grp)
+	if err != nil {
+		log.Fatal("could not start main program", "error", err)
 	}
 
 	ts, err := tshelper.NewListeners(hostname, sshPort, httpPort)
