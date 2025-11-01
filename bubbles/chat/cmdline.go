@@ -1,4 +1,4 @@
-package main
+package chat
 
 import (
 	"fmt"
@@ -7,8 +7,6 @@ import (
 	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
-
-	"github.com/ghthor/webwish/bubbles/chat"
 	"github.com/ghthor/webwish/bubbles/tetris"
 )
 
@@ -34,18 +32,18 @@ func formatToggle(b bool) string {
 /theme [colors|...]        - Set your color theme.
 /whois USER                - Information about USER.
 */
-func (m *Model) SetupCmdPalette() {
-	cmds := make([]chat.Cmd, 0, 10)
+func (m *Client) SetupCmdPalette() {
+	cmds := make([]Cmd, 0, 10)
 
 	// help
-	cmds = append(cmds, chat.Cmd{
+	cmds = append(cmds, Cmd{
 		Use: "help",
-		Run: func(cmd *chat.Cmd, args []string) tea.Cmd {
+		Run: func(cmd *Cmd, args []string) tea.Cmd {
 			if !m.tetrisConnected {
 				m.cmdLine.Placeholder = ""
-				m.chatView.Push(chat.HelpMsg(m.Time, m.cmdPalette.Usage()))
+				m.chatView.Push(HelpMsg(m.Time, m.cmdPalette.Usage()))
 			} else if m.tetrisConnected {
-				m.chatView.Push(chat.HelpMsg(m.Time, strings.TrimLeftFunc(`
+				m.chatView.Push(HelpMsg(m.Time, strings.TrimLeftFunc(`
 Input is queued until >50% of players have chosen/voted for the same input
 
     [ d ]  [ f ]       [ j ]  [ k ]
@@ -64,11 +62,11 @@ Input is queued until >50% of players have chosen/voted for the same input
 	})
 
 	// exit
-	cmds = append(cmds, chat.Cmd{
+	cmds = append(cmds, Cmd{
 		Use:     "exit",
 		Short:   "Exit the chat, ctrl+c will also exit",
 		Aliases: []string{"quit", "q"},
-		Run: func(cmd *chat.Cmd, args []string) tea.Cmd {
+		Run: func(cmd *Cmd, args []string) tea.Cmd {
 			switch {
 			case m.tetrisConnected:
 				return m.exitTetrisCmd()
@@ -79,12 +77,12 @@ Input is queued until >50% of players have chosen/voted for the same input
 	})
 
 	// names
-	cmds = append(cmds, chat.Cmd{
+	cmds = append(cmds, Cmd{
 		Use:   "names",
 		Short: "List users who are connected.",
-		Run: func(cmd *chat.Cmd, args []string) tea.Cmd {
+		Run: func(cmd *Cmd, args []string) tea.Cmd {
 			var (
-				req  = chat.NamesReq{Requestor: m.Id()}
+				req  = NamesReq{Requestor: m.Id()}
 				send = m.Send
 			)
 			return func() tea.Msg {
@@ -98,33 +96,33 @@ Input is queued until >50% of players have chosen/voted for the same input
 	})
 
 	// quiet
-	cmds = append(cmds, chat.Cmd{
+	cmds = append(cmds, Cmd{
 		Use:   "quiet",
 		Short: "Toggle system announcements.",
-		Run: func(cmd *chat.Cmd, args []string) tea.Cmd {
+		Run: func(cmd *Cmd, args []string) tea.Cmd {
 			m.quiet = !m.quiet
-			m.chatView.Push(chat.InfoMsg(m.Time, fmt.Sprintf("Quiet mode toggled %s", formatToggle(m.quiet))))
+			m.chatView.Push(InfoMsg(m.Time, fmt.Sprintf("Quiet mode toggled %s", formatToggle(m.quiet))))
 			return nil
 		},
 	})
 
 	// timestamp
-	cmds = append(cmds, chat.Cmd{
+	cmds = append(cmds, Cmd{
 		// TODO: /timestamp [time|datetime] - Prefix messages with a timestamp. You can also provide the UTC offset: /timestamp time +5h45m
 		Use:   "timestamp",
 		Short: "Toggle chat timestamps.",
-		Run: func(cmd *chat.Cmd, args []string) tea.Cmd {
+		Run: func(cmd *Cmd, args []string) tea.Cmd {
 			m.showTimestamp = !m.showTimestamp
-			m.chatView.Push(chat.InfoMsg(m.Time, fmt.Sprintf("Timestamp is toggled %s", formatToggle(m.showTimestamp))))
+			m.chatView.Push(InfoMsg(m.Time, fmt.Sprintf("Timestamp is toggled %s", formatToggle(m.showTimestamp))))
 			return nil
 		},
 	})
 
 	// debug_perf
-	cmds = append(cmds, chat.Cmd{
+	cmds = append(cmds, Cmd{
 		Use:    "debug_perf <INT>",
 		Hidden: true,
-		Run: func(cmd *chat.Cmd, args []string) tea.Cmd {
+		Run: func(cmd *Cmd, args []string) tea.Cmd {
 			if len(args) == 1 {
 				return m.SendChatCmd("argument required: " + cmd.Use)
 			}
@@ -138,10 +136,10 @@ Input is queued until >50% of players have chosen/voted for the same input
 	})
 
 	// tetris
-	cmds = append(cmds, chat.Cmd{
+	cmds = append(cmds, Cmd{
 		Use:   "tetris [exit]",
 		Short: "Start/Join chat plays tetris.",
-		Run: func(cmd *chat.Cmd, args []string) tea.Cmd {
+		Run: func(cmd *Cmd, args []string) tea.Cmd {
 			argsStr := ""
 			if len(args) > 1 {
 				argsStr = strings.Join(args[1:], " ")
@@ -166,11 +164,11 @@ Input is queued until >50% of players have chosen/voted for the same input
 		},
 	})
 
-	p := chat.NewCmdPalette("/", cmds...)
+	p := NewCmdPalette("/", cmds...)
 	m.cmdPalette = p
 }
 
-func (m *Model) exitTetrisCmd() tea.Cmd {
+func (m *Client) exitTetrisCmd() tea.Cmd {
 	m.tetrisConnected = false
 	m.cmdLine.Prompt = "> "
 	m.cmdLine.Placeholder = ""
