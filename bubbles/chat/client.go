@@ -208,7 +208,7 @@ func (m *Client) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 			if m.tetrisConnected && m.cmdLine.Focused() {
 				m.cmdLine.Blur()
 			}
-		case "/":
+		case m.cmdPalette.leader:
 			if m.tetrisConnected && !m.cmdLine.Focused() {
 				cmds = append(cmds, m.cmdLine.Focus())
 			}
@@ -322,8 +322,8 @@ func (m *Client) updateSuggestions(msg tea.Msg) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "/":
-			if m.cmdLine.Value() == "/" {
+		case m.cmdPalette.leader:
+			if m.cmdLine.Value() == m.cmdPalette.leader {
 				m.cmdLine.SetSuggestions(m.cmdPalette.Suggestions())
 			}
 		}
@@ -342,11 +342,11 @@ func (m *Client) CmdLineExecute() tea.Cmd {
 
 	value := m.cmdLine.Value()
 
-	if !strings.HasPrefix(value, "/") {
+	if !strings.HasPrefix(value, m.cmdPalette.leader) {
 		return m.SendChatCmd(value)
 	}
 
-	argsStr := strings.TrimPrefix(value, "/")
+	argsStr := strings.TrimPrefix(value, m.cmdPalette.leader)
 
 	cmd, _, _ := strings.Cut(argsStr, " ")
 	if cmd == "" {
