@@ -1,4 +1,4 @@
-module github.com/ghthor/webwish
+module github.com/ghthor/webtea
 
 go 1.25.3
 

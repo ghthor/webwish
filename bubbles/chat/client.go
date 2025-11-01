@@ -13,10 +13,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
 	"github.com/charmbracelet/log"
-	"github.com/ghthor/webwish/bubbles/tetris"
-	"github.com/ghthor/webwish/mpty"
-	"github.com/ghthor/webwish/teamodel"
-	"github.com/ghthor/webwish/unsafering"
+	"github.com/ghthor/webtea/bubbles/tetris"
+	"github.com/ghthor/webtea/mpty"
+	"github.com/ghthor/webtea/teamodel"
+	"github.com/ghthor/webtea/unsafering"
 	overlay "github.com/rmhubbert/bubbletea-overlay"
 )
 

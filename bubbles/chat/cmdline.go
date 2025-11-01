@@ -7,7 +7,7 @@ import (
 	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/ghthor/webwish/bubbles/tetris"
+	"github.com/ghthor/webtea/bubbles/tetris"
 )
 
 func formatToggle(b bool) string {

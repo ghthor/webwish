@@ -8,7 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/ghthor/webwish/mpty"
+	"github.com/ghthor/webtea/mpty"
 	"github.com/golang-cz/ringbuf"
 )
 

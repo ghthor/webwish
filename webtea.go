@@ -1,4 +1,4 @@
-package webwish
+package webtea
 
 import (
 	"context"

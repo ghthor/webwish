@@ -9,8 +9,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/log"
-	"github.com/ghthor/webwish/bubbles/tetris"
-	"github.com/ghthor/webwish/mpty"
+	"github.com/ghthor/webtea/bubbles/tetris"
+	"github.com/ghthor/webtea/mpty"
 	"github.com/golang-cz/ringbuf"
 )
 

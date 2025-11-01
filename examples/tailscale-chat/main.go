@@ -23,11 +23,11 @@ import (
 	"github.com/charmbracelet/ssh"
 	"github.com/charmbracelet/wish"
 	"github.com/charmbracelet/wish/logging"
-	"github.com/ghthor/webwish"
-	"github.com/ghthor/webwish/bubbles/chat"
-	"github.com/ghthor/webwish/mpty"
-	"github.com/ghthor/webwish/tshelper"
-	"github.com/ghthor/webwish/tstea"
+	"github.com/ghthor/webtea"
+	"github.com/ghthor/webtea/bubbles/chat"
+	"github.com/ghthor/webtea/mpty"
+	"github.com/ghthor/webtea/tshelper"
+	"github.com/ghthor/webtea/tstea"
 	"golang.org/x/sync/errgroup"
 	"tailscale.com/client/tailscale/apitype"
 )
@@ -94,20 +94,20 @@ func main() {
 	log.Infof("Starting HTTP server http://%s:%d", tsIPv4.String(), httpPort)
 
 	err = errors.Join(
-		webwish.RunSSH(grpCtx, grp, cancel, ts.Ssh, s),
-		webwish.RunHTTP(grpCtx, grp, cancel, ts.Http, webtty, hostname),
+		webtea.RunSSH(grpCtx, grp, cancel, ts.Ssh, s),
+		webtea.RunHTTP(grpCtx, grp, cancel, ts.Http, webtty, hostname),
 	)
 	if err != nil {
-		log.Fatal("failed to start webwish", "error", err)
+		log.Fatal("failed to start webtea", "error", err)
 	}
 
 	<-ctx.Done()
 	if err = context.Cause(rootCtx); err != nil && !errors.Is(err, context.Canceled) {
-		log.Error("failed to start webwish", "error", err)
+		log.Error("failed to start webtea", "error", err)
 	}
 
 	log.Info("Stopping SSH server")
-	err = webwish.ShutdownSSH(s, 30*time.Second)
+	err = webtea.ShutdownSSH(s, 30*time.Second)
 	if err != nil {
 		log.Error("Could not stop server", "error", err)
 	}
