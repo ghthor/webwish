@@ -172,9 +172,11 @@ type Model struct {
 
 	cmds []tea.Cmd
 
-	cmdLine textinput.Model
-	table   *table.Table
-	view    viewport.Model
+	cmdLine    textinput.Model
+	cmdPalette chat.CmdPalette
+
+	table *table.Table
+	view  viewport.Model
 
 	chatView *unsafering.Buffer[chat.Msg]
 
@@ -249,6 +251,8 @@ func (m *Model) Init() tea.Cmd {
 	if m.cmds == nil {
 		m.cmds = make([]tea.Cmd, 0, 1)
 	}
+
+	m.SetupCmdPalette()
 
 	// TODO: dynamic suggestions
 	m.cmdLine = textinput.New()
@@ -441,7 +445,7 @@ func (m *Model) updateSuggestions(msg tea.Msg) {
 		switch msg.String() {
 		case "/":
 			if m.cmdLine.Value() == "/" {
-				m.cmdLine.SetSuggestions(commandSuggestions(commands))
+				m.cmdLine.SetSuggestions(m.cmdPalette.Suggestions())
 			}
 		}
 	}
@@ -463,7 +467,9 @@ func (m *Model) CmdLineExecute() tea.Cmd {
 		return m.SendChatCmd(value)
 	}
 
-	cmd, rest, _ := strings.Cut(m.cmdLine.Value(), " ")
+	argsStr := strings.TrimPrefix(value, "/")
+
+	cmd, _, _ := strings.Cut(argsStr, " ")
 	if cmd == "" {
 		return nil
 	}
@@ -476,8 +482,9 @@ func (m *Model) CmdLineExecute() tea.Cmd {
 		Str:     value,
 	})
 
-	if c, ok := commands[cmd]; ok {
-		return c.fn(m, cmd, rest)
+	c := m.cmdPalette.Find(cmd)
+	if c != nil {
+		return c.Run(c, strings.Split(argsStr, " "))
 	}
 
 	return nil

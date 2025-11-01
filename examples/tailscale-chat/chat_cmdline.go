@@ -2,8 +2,6 @@ package main
 
 import (
 	"fmt"
-	"maps"
-	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -22,16 +20,6 @@ func formatToggle(b bool) string {
 	return "OFF"
 }
 
-type commandFn func(m *Model, cmd, rest string) tea.Cmd
-
-type command struct {
-	fn commandFn
-}
-
-func mkCommand(f commandFn) command {
-	return command{f}
-}
-
 /*
 	TODO
 
@@ -46,11 +34,17 @@ func mkCommand(f commandFn) command {
 /theme [colors|...]        - Set your color theme.
 /whois USER                - Information about USER.
 */
-var commands = map[string]command{
-	"/help": mkCommand(func(m *Model, _, _ string) tea.Cmd {
-		if !m.tetrisConnected {
-			m.cmdLine.Placeholder = ""
-			m.chatView.Push(chat.HelpMsg(m.Time, strings.TrimLeftFunc(`
+func (m *Model) SetupCmdPalette() {
+	cmds := make([]chat.Cmd, 0, 10)
+
+	// help
+	cmds = append(cmds, chat.Cmd{
+		// TODO: auto generated help from the pallete
+		Use: "help",
+		Run: func(cmd *chat.Cmd, args []string) tea.Cmd {
+			if !m.tetrisConnected {
+				m.cmdLine.Placeholder = ""
+				m.chatView.Push(chat.HelpMsg(m.Time, strings.TrimLeftFunc(`
 Type out a message and press <enter> or use a command
 
 -> Available commands:
@@ -63,8 +57,8 @@ Type out a message and press <enter> or use a command
 -> For input key mappings see:
   - https://github.com/charmbracelet/bubbles/blob/v0.21.0/textinput/textinput.go#L68
 `, unicode.IsSpace)))
-		} else if m.tetrisConnected {
-			m.chatView.Push(chat.HelpMsg(m.Time, strings.TrimLeftFunc(`
+			} else if m.tetrisConnected {
+				m.chatView.Push(chat.HelpMsg(m.Time, strings.TrimLeftFunc(`
 Input is queued until >50% of players have chosen/voted for the same input
 
     [ d ]  [ f ]       [ j ]  [ k ]
@@ -77,66 +71,111 @@ Input is queued until >50% of players have chosen/voted for the same input
 /exit                      - Exit tetris
 
 `, unicode.IsSpace)))
-		}
-		return nil
-	}),
-
-	"/names": mkCommand(func(m *Model, cmd, _ string) tea.Cmd {
-		var (
-			req  = chat.NamesReq{Requestor: m.Id()}
-			send = m.Send
-		)
-		return func() tea.Msg {
-			select {
-			case <-m.ctx.Done():
-			case send <- req:
 			}
 			return nil
-		}
-	}),
+		},
+	})
 
-	"/quiet": mkCommand(func(m *Model, cmd, _ string) tea.Cmd {
-		m.quiet = !m.quiet
-		m.chatView.Push(chat.InfoMsg(m.Time, fmt.Sprintf("Quiet mode toggled %s", formatToggle(m.quiet))))
-		return nil
-	}),
+	// exit
+	cmds = append(cmds, chat.Cmd{
+		Use:     "exit",
+		Aliases: []string{"quit", "q"},
+		Run: func(cmd *chat.Cmd, args []string) tea.Cmd {
+			switch {
+			case m.tetrisConnected:
+				return m.exitTetrisCmd()
+			default:
+				return tea.Quit
+			}
+		},
+	})
 
-	"/debug_perf": mkCommand(func(m *Model, cmd, args string) tea.Cmd {
-		i, err := strconv.Atoi(args)
-		if err != nil {
-			return m.SendChatCmd(fmt.Sprintf("%s => %v", m.cmdLine.Value(), err))
-		}
-		return m.SendCountCmd(i)
-	}),
-
-	// TODO: /timestamp [time|datetime] - Prefix messages with a timestamp. You can also provide the UTC offset: /timestamp time +5h45m
-	"/timestamp": mkCommand(func(m *Model, _, _ string) tea.Cmd {
-		m.showTimestamp = !m.showTimestamp
-		m.chatView.Push(chat.InfoMsg(m.Time, fmt.Sprintf("Timestamp is toggled %s", formatToggle(m.showTimestamp))))
-		return nil
-	}),
-	"/tetris": mkCommand(func(m *Model, _, args string) tea.Cmd {
-		switch args {
-		case "":
-			if m.tetrisConnected {
+	// names
+	cmds = append(cmds, chat.Cmd{
+		Use: "names",
+		Run: func(cmd *chat.Cmd, args []string) tea.Cmd {
+			var (
+				req  = chat.NamesReq{Requestor: m.Id()}
+				send = m.Send
+			)
+			return func() tea.Msg {
+				select {
+				case <-m.ctx.Done():
+				case send <- req:
+				}
 				return nil
 			}
+		},
+	})
 
-			m.tetrisConnected = true
-			m.cmdLine.Prompt = "tetris> "
-			m.cmdLine.Placeholder = "/ to open command line"
-			m.cmdLine.Blur()
-			return sendMsgCmd(m.ctx, m.Send, tetris.MPConnectPlayerMsg(m.Id()))
-		case "stop":
-			return m.exitTetrisCmd()
-		default:
-		}
-		return nil
-	}),
+	// quiet
+	cmds = append(cmds, chat.Cmd{
+		Use: "quiet",
+		Run: func(cmd *chat.Cmd, args []string) tea.Cmd {
+			m.quiet = !m.quiet
+			m.chatView.Push(chat.InfoMsg(m.Time, fmt.Sprintf("Quiet mode toggled %s", formatToggle(m.quiet))))
+			return nil
+		},
+	})
 
-	"/exit": exitCommand,
-	"/quit": exitCommand,
-	"/q":    exitCommand,
+	// timestamp
+	cmds = append(cmds, chat.Cmd{
+		// TODO: /timestamp [time|datetime] - Prefix messages with a timestamp. You can also provide the UTC offset: /timestamp time +5h45m
+		Use: "timestamp",
+		Run: func(cmd *chat.Cmd, args []string) tea.Cmd {
+			m.showTimestamp = !m.showTimestamp
+			m.chatView.Push(chat.InfoMsg(m.Time, fmt.Sprintf("Timestamp is toggled %s", formatToggle(m.showTimestamp))))
+			return nil
+		},
+	})
+
+	// debug_perf
+	cmds = append(cmds, chat.Cmd{
+		Use:    "debug_perf [INT]",
+		Hidden: true,
+		Run: func(cmd *chat.Cmd, args []string) tea.Cmd {
+			if len(args) == 1 {
+				return m.SendChatCmd("argument required: " + cmd.Use)
+			}
+
+			i, err := strconv.Atoi(args[1])
+			if err != nil {
+				return m.SendChatCmd(fmt.Sprintf("%s => %v: %s", m.cmdLine.Value(), err, cmd.Use))
+			}
+			return m.SendCountCmd(i)
+		},
+	})
+
+	// tetris
+	cmds = append(cmds, chat.Cmd{
+		Use: "tetris",
+		Run: func(cmd *chat.Cmd, args []string) tea.Cmd {
+			argsStr := ""
+			if len(args) > 1 {
+				argsStr = strings.Join(args[1:], " ")
+			}
+
+			switch argsStr {
+			case "":
+				if m.tetrisConnected {
+					return nil
+				}
+
+				m.tetrisConnected = true
+				m.cmdLine.Prompt = "tetris> "
+				m.cmdLine.Placeholder = "/ to open command line"
+				m.cmdLine.Blur()
+				return sendMsgCmd(m.ctx, m.Send, tetris.MPConnectPlayerMsg(m.Id()))
+			case "stop":
+				return m.exitTetrisCmd()
+			default:
+			}
+			return nil
+		},
+	})
+
+	p := chat.NewCmdPalette('/', cmds...)
+	m.cmdPalette = p
 }
 
 func (m *Model) exitTetrisCmd() tea.Cmd {
@@ -147,17 +186,4 @@ func (m *Model) exitTetrisCmd() tea.Cmd {
 		return m.cmdLine.Focus()
 	}
 	return sendMsgCmd(m.ctx, m.Send, tetris.MPDisconnectPlayerMsg(m.Id()))
-}
-
-var exitCommand = mkCommand(func(m *Model, cmd, _ string) tea.Cmd {
-	switch {
-	case m.tetrisConnected:
-		return m.exitTetrisCmd()
-	default:
-		return tea.Quit
-	}
-})
-
-func commandSuggestions(cmds map[string]command) []string {
-	return slices.Sorted(maps.Keys(cmds))
 }
