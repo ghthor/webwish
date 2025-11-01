@@ -38,7 +38,6 @@ func mkCommand(f commandFn) command {
 -> Available commands:
 /away [REASON]             - Set away reason, or empty to unset.
 /back                      - Clear away status.
-/exit                      - Exit the chat.
 /focus [USER ...]          - Only show messages from focused users, or $ to reset.
 /ignore [USER]             - Hide messages from USER, /unignore USER to stop hiding.
 /msg USER MESSAGE          - Send MESSAGE to USER.
@@ -137,6 +136,7 @@ Input is queued until >50% of players have chosen/voted for the same input
 
 	"/exit": exitCommand,
 	"/quit": exitCommand,
+	"/q":    exitCommand,
 }
 
 func (m *Model) exitTetrisCmd() tea.Cmd {
