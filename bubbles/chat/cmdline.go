@@ -124,14 +124,14 @@ Input is queued until >50% of players have chosen/voted for the same input
 		Hidden: true,
 		Run: func(cmd *Cmd, args []string) tea.Cmd {
 			if len(args) == 1 {
-				return m.SendChatCmd("argument required: " + cmd.Use)
+				return m.sendChatCmd("argument required: " + cmd.Use)
 			}
 
 			i, err := strconv.Atoi(args[1])
 			if err != nil {
-				return m.SendChatCmd(fmt.Sprintf("%s => %v: %s", m.cmdLine.Value(), err, cmd.Use))
+				return m.sendChatCmd(fmt.Sprintf("%s => %v: %s", m.cmdLine.Value(), err, cmd.Use))
 			}
-			return m.SendCountCmd(i)
+			return m.sendCountCmd(i)
 		},
 	})
 

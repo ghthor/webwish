@@ -114,6 +114,7 @@ func (m *Client) At(row, cell int) string {
 func (m *Client) Rows() int {
 	return m.chatView.Len()
 }
+
 func (m *Client) Columns() int {
 	if m.showTimestamp {
 		return 3
@@ -181,6 +182,11 @@ func (m *Client) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m.UpdateClient(msg)
 }
 
+func (m *Client) UpdateChat(msg tea.Msg) (*Client, tea.Cmd) {
+	_, cmd := m.UpdateClient(msg)
+	return m, cmd
+}
+
 func (m *Client) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 	var (
 		cmd  tea.Cmd
@@ -204,7 +210,7 @@ func (m *Client) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 		case "ctrl+c":
 			return m, tea.Quit
 		case "enter":
-			cmds = append(cmds, m.CmdLineExecute())
+			cmds = append(cmds, m.cmdLineExecute())
 			if m.tetrisConnected && m.cmdLine.Focused() {
 				m.cmdLine.Blur()
 			}
@@ -255,12 +261,13 @@ func (m *Client) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 	cmds = append(cmds, cmd)
 	m.updateSuggestions(msg)
 
-	cmds = append(cmds, m.UpdateTetris(msg))
+	cmds = append(cmds, m.updateTetris(msg))
 
+	m.cmds = cmds
 	return m, tea.Batch(cmds...)
 }
 
-func (m *Client) UpdateTetris(msg tea.Msg) tea.Cmd {
+func (m *Client) updateTetris(msg tea.Msg) tea.Cmd {
 	if !m.tetrisConnected {
 		return nil
 	}
@@ -330,7 +337,7 @@ func (m *Client) updateSuggestions(msg tea.Msg) {
 	}
 }
 
-func (m *Client) CmdLineExecute() tea.Cmd {
+func (m *Client) cmdLineExecute() tea.Cmd {
 	if !m.cmdLine.Focused() {
 		return nil
 	}
@@ -343,7 +350,7 @@ func (m *Client) CmdLineExecute() tea.Cmd {
 	value := m.cmdLine.Value()
 
 	if !strings.HasPrefix(value, m.cmdPalette.leader) {
-		return m.SendChatCmd(value)
+		return m.sendChatCmd(value)
 	}
 
 	argsStr := strings.TrimPrefix(value, m.cmdPalette.leader)
@@ -369,7 +376,7 @@ func (m *Client) CmdLineExecute() tea.Cmd {
 	return nil
 }
 
-func (m *Client) SendChatCmd(msg string) tea.Cmd {
+func (m *Client) sendChatCmd(msg string) tea.Cmd {
 	var (
 		who  = m.Who.UserProfile.LoginName
 		sess = m.Sess.RemoteAddr().String()
@@ -394,7 +401,7 @@ func (m *Client) SendChatCmd(msg string) tea.Cmd {
 	}
 }
 
-func (m *Client) SendCountCmd(i int) tea.Cmd {
+func (m *Client) sendCountCmd(i int) tea.Cmd {
 	var (
 		who  = m.Who.UserProfile.LoginName
 		sess = m.Sess.RemoteAddr().String()

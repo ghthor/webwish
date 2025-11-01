@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/log"
 	"github.com/charmbracelet/ssh"
 	"github.com/charmbracelet/wish"
@@ -116,9 +117,66 @@ func main() {
 }
 
 func newSshModel(ctx context.Context, pty ssh.Pty, sess mpty.Session, who *apitype.WhoIsResponse) mpty.ClientModel {
-	return chat.NewClient(ctx, mpty.NewClientInfoModelFromSsh(pty, sess, who))
+	info := mpty.NewClientInfoModelFromSsh(pty, sess, who)
+	return &Model{
+		ctx: ctx,
+
+		ClientInfoModel: info,
+		chat:            chat.NewClient(ctx, info),
+	}
 }
 
 func newHttpModel(ctx context.Context, sess mpty.Session, who *apitype.WhoIsResponse) mpty.ClientModel {
-	return chat.NewClient(ctx, mpty.NewClientInfoModelFromWebtty(sess, who))
+	info := mpty.NewClientInfoModelFromWebtty(sess, who)
+	return &Model{
+		ctx: ctx,
+
+		ClientInfoModel: info,
+		chat:            chat.NewClient(ctx, info),
+	}
+}
+
+type Model struct {
+	ctx context.Context
+
+	*mpty.ClientInfoModel
+
+	chat *chat.Client
+
+	cmds []tea.Cmd
+}
+
+var _ mpty.ClientModel = &Model{}
+
+func (m *Model) Init() tea.Cmd {
+	if m.cmds == nil {
+		m.cmds = make([]tea.Cmd, 0, 2)
+	}
+	return tea.Batch(
+		m.ClientInfoModel.Init(),
+		m.chat.Init(),
+	)
+}
+
+func (m *Model) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
+	var (
+		cmd  tea.Cmd
+		cmds = m.cmds[:0]
+	)
+	m.ClientInfoModel, cmd = m.ClientInfoModel.UpdateInfo(msg)
+	cmds = append(cmds, cmd)
+
+	m.chat, cmd = m.chat.UpdateChat(msg)
+	cmds = append(cmds, cmd)
+
+	m.cmds = cmds
+	return m, tea.Batch(cmds...)
+}
+
+func (m *Model) View() string {
+	return m.chat.View()
+}
+
+func (m *Model) Err() error {
+	return m.chat.Err()
 }
