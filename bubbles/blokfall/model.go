@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"slices"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -288,10 +289,34 @@ func (m *Model) SoftDown(i int) tea.Cmd {
 // func (m *Model) LockPiece(resetTick bool) tea.Cmd {
 func (m *Model) LockPiece(i int) tea.Cmd {
 	p := m.pieces[i]
-	m.board.LockPiece(p)
+
+	cleared := m.board.LockPiece(p)
+	m.Score(cleared)
+
 	m.pieces[i] = m.PullNext()
 	m.render = true
 	return m.NewTick(i)
+}
+
+// TODO: game over
+// TODO: add persistant leaderboard & players list
+func (m *Model) Score(lines int) {
+	switch lines {
+	case 4:
+		m.score += uint64(1500 * (m.level + 1))
+	case 3:
+		m.score += uint64(400 * (m.level + 1))
+	case 2:
+		m.score += uint64(110 * (m.level + 1))
+	case 1:
+		m.score += uint64(50 * (m.level + 1))
+	default:
+	}
+
+	if m.linesScored/11 < (m.linesScored+lines)/11 {
+		m.level++
+	}
+	m.linesScored += lines
 }
 
 func (m *Model) HandleTickMsg(msg TickMsg) tea.Cmd {
@@ -369,9 +394,15 @@ func (m *Model) View() string {
 	m.tableView.board = m.b.String()
 	m.b.Reset()
 
-	m.ViewNextPiecesIn(&m.b)
-	m.tableView.nextPiece = m.b.String()
+	m.ViewNextPiecesTo(&m.b)
+	nextPiece := m.b.String()
 	m.b.Reset()
+
+	m.ViewScoreTo(&m.b)
+	score := m.b.String()
+	m.b.Reset()
+
+	m.tableView.nextPiece = lipgloss.JoinVertical(lipgloss.Left, nextPiece, score)
 
 	m.render = false
 	m.table.Data(m.tableView)
@@ -379,10 +410,19 @@ func (m *Model) View() string {
 	return m.b.String()
 }
 
-func (m *Model) ViewNextPiecesIn(w io.Writer) {
+func (m *Model) ViewNextPiecesTo(w io.Writer) {
 	for p := range m.next.Iter() {
 		m.PrintPiece(w, p)
 	}
+}
+
+func (m *Model) ViewScoreTo(w io.Writer) {
+	t := tabwriter.NewWriter(w, 0, 0, 1, ' ', 0)
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "ln\t%d\t\n", m.linesScored)
+	fmt.Fprintf(w, "lv\t%d\t\n", m.level)
+	fmt.Fprintf(w, "%d\n", m.score)
+	t.Flush()
 }
 
 const (
@@ -497,9 +537,7 @@ func (m *Model) PrintPiece(w io.Writer, p *Piece) {
 				fmt.Fprint(b, m.board.Colors[cell].Render(m.board.Filled))
 			}
 		}
-		if y < ShapeRange.Max.Y {
-			fmt.Fprintln(b)
-		}
+		fmt.Fprintln(b)
 	}
 	fmt.Fprintln(w, b.String())
 }
@@ -518,7 +556,8 @@ func (b *Board) Collides(p *Piece) bool {
 	return false
 }
 
-func (b *Board) LockPiece(p *Piece) {
+// LockPiece returns number of lines cleared
+func (b *Board) LockPiece(p *Piece) int {
 	for _, blk := range p.Blocks {
 		bx := p.X + blk.X
 		by := p.Y + blk.Y
@@ -526,8 +565,8 @@ func (b *Board) LockPiece(p *Piece) {
 			b.Cells[by][bx] = p.Color
 		}
 	}
-	// TODO: score based on lines cleared
-	b.ClearLines()
+
+	return b.ClearLines()
 }
 
 func (b *Board) ClearLines() int {
