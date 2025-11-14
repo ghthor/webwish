@@ -94,7 +94,7 @@ func newChatData(sz int) *chatData {
 
 func (c *chatData) Push(m Msg) {
 	c.Buffer.Push(m)
-	c.nickWidths.Push(lipgloss.Width(m.nick))
+	c.nickWidths.Push(lipgloss.Width(m.Nick()))
 	c.nickWidth = c.NickMaxWidth()
 }
 
