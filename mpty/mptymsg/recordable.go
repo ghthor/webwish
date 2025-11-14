@@ -29,7 +29,7 @@ func Register[T Recordable](t T) {
 		if err != nil {
 			return nil, err
 		}
-		return any(v).(Recordable), nil
+		return v, nil
 	}
 }
 
