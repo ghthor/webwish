@@ -21,6 +21,10 @@ import (
 	overlay "github.com/rmhubbert/bubbletea-overlay"
 )
 
+type ChatSizeMsg struct {
+	Width, Height int
+}
+
 var (
 	Bold       = lipgloss.NewStyle().Bold(true)
 	None       = lipgloss.NewStyle()
@@ -50,7 +54,7 @@ var (
 			Align(lipgloss.Right).
 			MarginRight(1).
 			PaddingRight(1).
-			BorderStyle(VertLine).
+			Border(VertLine, false).
 			BorderRight(true)
 
 	StyleSysNick = StyleNick.Faint(true)
@@ -294,6 +298,9 @@ func (m *Client) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 	case mpty.Input:
 		m.Send = msg
 
+	case ChatSizeMsg:
+		m.SetSize(msg.Width, msg.Height)
+
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c":
@@ -328,8 +335,13 @@ func (m *Client) UpdateClient(msg tea.Msg) (mpty.ClientModel, tea.Cmd) {
 				m.info, cmd = m.info.UpdateInfo(msg)
 				cmds = append(cmds, cmd)
 			case Msg:
-				if m.quiet && msg.Who == SysNick {
-				} else {
+				switch msg.Who {
+				case SysNick:
+					if m.quiet {
+						break
+					}
+					fallthrough
+				default:
 					m.chatData.Push(msg)
 				}
 			case NamesReq:
